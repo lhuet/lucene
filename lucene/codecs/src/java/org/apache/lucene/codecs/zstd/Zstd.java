@@ -16,12 +16,13 @@
  */
 package org.apache.lucene.codecs.zstd;
 
-import com.sun.jna.Library;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+
+import com.sun.jna.Library;
+import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 
 /** JNA bindings for ZSTD. */
 final class Zstd {

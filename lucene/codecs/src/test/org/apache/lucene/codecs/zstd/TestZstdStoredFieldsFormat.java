@@ -16,8 +16,10 @@
  */
 package org.apache.lucene.codecs.zstd;
 
+import static org.junit.Assume.assumeTrue;
+
 import org.apache.lucene.codecs.Codec;
-import org.apache.lucene.index.BaseStoredFieldsFormatTestCase;
+import org.apache.lucene.tests.index.BaseStoredFieldsFormatTestCase;
 import org.junit.Before;
 
 public class TestZstdStoredFieldsFormat extends BaseStoredFieldsFormatTestCase {

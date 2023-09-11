@@ -22,6 +22,7 @@ import org.apache.lucene.codecs.compressing.CompressionMode;
 import org.apache.lucene.codecs.compressing.Compressor;
 import org.apache.lucene.codecs.compressing.Decompressor;
 import org.apache.lucene.codecs.lucene90.compressing.Lucene90CompressingStoredFieldsFormat;
+import org.apache.lucene.store.ByteBuffersDataInput;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.ArrayUtil;
@@ -157,11 +158,13 @@ public final class ZstdStoredFieldsFormat extends Lucene90CompressingStoredField
   private static class ZstdCompressor extends Compressor {
 
     final int level;
+    byte[] buffer;
     byte[] compressed;
 
     ZstdCompressor(int level) {
       this.level = level;
       compressed = BytesRef.EMPTY_BYTES;
+      buffer = BytesRef.EMPTY_BYTES;
     }
 
     private void doCompress(
@@ -192,24 +195,29 @@ public final class ZstdStoredFieldsFormat extends Lucene90CompressingStoredField
     }
 
     @Override
-    public void compress(byte[] bytes, int off, int len, DataOutput out) throws IOException {
+    public void compress(ByteBuffersDataInput buffersInput, DataOutput out) throws IOException {
+      final int len = (int) (buffersInput.size() - buffersInput.position());
       final int dictLength = len / (NUM_SUB_BLOCKS * DICT_SIZE_FACTOR);
       final int blockLength = (len - dictLength + NUM_SUB_BLOCKS - 1) / NUM_SUB_BLOCKS;
       out.writeVInt(dictLength);
       out.writeVInt(blockLength);
-      final int end = off + len;
+
+      buffer = ArrayUtil.growNoCopy(buffer, dictLength + blockLength);
 
       // Compress the dictionary first
       try (Zstd.Compressor cctx = new Zstd.Compressor()) {
 
         // First compress the dictionary
-        doCompress(bytes, off, dictLength, cctx, null, out);
+        buffersInput.readBytes(buffer, 0, dictLength);
+        doCompress(buffer, 0, dictLength, cctx, null, out);
 
         // And then sub blocks with this dictionary
         try (Zstd.CompressionDictionary cdict =
-            Zstd.createCompressionDictionary(ByteBuffer.wrap(bytes, off, dictLength), level)) {
-          for (int start = off + dictLength; start < end; start += blockLength) {
-            doCompress(bytes, start, Math.min(blockLength, off + len - start), cctx, cdict, out);
+            Zstd.createCompressionDictionary(ByteBuffer.wrap(buffer, 0, dictLength), level)) {
+          for (int start = dictLength; start < len; start += blockLength) {
+            int l = Math.min(blockLength, len - start);
+            buffersInput.readBytes(buffer, dictLength, l);
+            doCompress(buffer, dictLength, l, cctx, cdict, out);
           }
         }
       }

@@ -18,7 +18,7 @@ package org.apache.lucene.codecs.zstd;
 
 import org.apache.lucene.codecs.FilterCodec;
 import org.apache.lucene.codecs.StoredFieldsFormat;
-import org.apache.lucene.codecs.lucene90.Lucene90Codec;
+import org.apache.lucene.codecs.lucene95.Lucene95Codec;
 
 /** Codec that uses ZSTD for stored fields. */
 public final class Zstd90Codec extends FilterCodec {
@@ -33,7 +33,7 @@ public final class Zstd90Codec extends FilterCodec {
 
   /** Create a new codec using the configured compression level. */
   public Zstd90Codec(int level) {
-    super("Zstd90", new Lucene90Codec());
+    super("Zstd90", new Lucene95Codec());
     this.format = new ZstdStoredFieldsFormat(level);
     this.level = level;
   }
