@@ -39,18 +39,6 @@ import org.apache.lucene.util.BitUtil;
  */
 public abstract class DataInput implements Cloneable {
 
-  private static final int SKIP_BUFFER_SIZE = 1024;
-
-  /* This buffer is used to skip over bytes with the slow implementation of
-   * skipBytesSlowly. The reason why we need to use an instance member instead of
-   * sharing a single instance across threads is that some delegating
-   * implementations of DataInput might want to reuse the provided buffer in
-   * order to eg. update the checksum. If we shared the same buffer across
-   * threads, then another thread might update the buffer while the checksum is
-   * being computed, making it invalid. See LUCENE-5583 for more information.
-   */
-  private byte[] skipBuffer;
-
   /**
    * Reads and returns a single byte.
    *
@@ -85,9 +73,10 @@ public abstract class DataInput implements Cloneable {
   }
 
   /**
-   * Reads two bytes and returns a short.
+   * Reads two bytes and returns a short (LE byte order).
    *
-   * @see DataOutput#writeByte(byte)
+   * @see DataOutput#writeShort(short)
+   * @see BitUtil#VH_LE_SHORT
    */
   public short readShort() throws IOException {
     final byte b1 = readByte();
@@ -96,9 +85,10 @@ public abstract class DataInput implements Cloneable {
   }
 
   /**
-   * Reads four bytes and returns an int.
+   * Reads four bytes and returns an int (LE byte order).
    *
    * @see DataOutput#writeInt(int)
+   * @see BitUtil#VH_LE_INT
    */
   public int readInt() throws IOException {
     final byte b1 = readByte();
@@ -117,9 +107,6 @@ public abstract class DataInput implements Cloneable {
    * @see DataOutput#writeVInt(int)
    */
   public int readVInt() throws IOException {
-    /* This is the original code of this method,
-     * but a Hotspot bug (see LUCENE-2975) corrupts the for-loop if
-     * readByte() is inlined. So the loop was unwinded!
     byte b = readByte();
     int i = b & 0x7F;
     for (int shift = 7; (b & 0x80) != 0; shift += 7) {
@@ -127,24 +114,6 @@ public abstract class DataInput implements Cloneable {
       i |= (b & 0x7F) << shift;
     }
     return i;
-    */
-    byte b = readByte();
-    if (b >= 0) return b;
-    int i = b & 0x7F;
-    b = readByte();
-    i |= (b & 0x7F) << 7;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7F) << 14;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7F) << 21;
-    if (b >= 0) return i;
-    b = readByte();
-    // Warning: the next ands use 0x0F / 0xF0 - beware copy/paste errors:
-    i |= (b & 0x0F) << 28;
-    if ((b & 0xF0) == 0) return i;
-    throw new IOException("Invalid vInt detected (too many bits)");
   }
 
   /**
@@ -158,9 +127,10 @@ public abstract class DataInput implements Cloneable {
   }
 
   /**
-   * Reads eight bytes and returns a long.
+   * Reads eight bytes and returns a long (LE byte order).
    *
    * @see DataOutput#writeLong(long)
+   * @see BitUtil#VH_LE_LONG
    */
   public long readLong() throws IOException {
     return (readInt() & 0xFFFFFFFFL) | (((long) readInt()) << 32);
@@ -175,6 +145,20 @@ public abstract class DataInput implements Cloneable {
     Objects.checkFromIndexSize(offset, length, dst.length);
     for (int i = 0; i < length; ++i) {
       dst[offset + i] = readLong();
+    }
+  }
+
+  /**
+   * Reads a specified number of ints into an array at the specified offset.
+   *
+   * @param dst the array to read bytes into
+   * @param offset the offset in the array to start storing ints
+   * @param length the number of ints to read
+   */
+  public void readInts(int[] dst, int offset, int length) throws IOException {
+    Objects.checkFromIndexSize(offset, length, dst.length);
+    for (int i = 0; i < length; ++i) {
+      dst[offset + i] = readInt();
     }
   }
 
@@ -201,13 +185,6 @@ public abstract class DataInput implements Cloneable {
    * @see DataOutput#writeVLong(long)
    */
   public long readVLong() throws IOException {
-    return readVLong(false);
-  }
-
-  private long readVLong(boolean allowNegative) throws IOException {
-    /* This is the original code of this method,
-     * but a Hotspot bug (see LUCENE-2975) corrupts the for-loop if
-     * readByte() is inlined. So the loop was unwinded!
     byte b = readByte();
     long i = b & 0x7F;
     for (int shift = 7; (b & 0x80) != 0; shift += 7) {
@@ -215,42 +192,6 @@ public abstract class DataInput implements Cloneable {
       i |= (b & 0x7FL) << shift;
     }
     return i;
-    */
-    byte b = readByte();
-    if (b >= 0) return b;
-    long i = b & 0x7FL;
-    b = readByte();
-    i |= (b & 0x7FL) << 7;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7FL) << 14;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7FL) << 21;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7FL) << 28;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7FL) << 35;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7FL) << 42;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7FL) << 49;
-    if (b >= 0) return i;
-    b = readByte();
-    i |= (b & 0x7FL) << 56;
-    if (b >= 0) return i;
-    if (allowNegative) {
-      b = readByte();
-      i |= (b & 0x7FL) << 63;
-      if (b == 0 || b == 1) return i;
-      throw new IOException("Invalid vLong detected (more than 64 bits)");
-    } else {
-      throw new IOException("Invalid vLong detected (negative values disallowed)");
-    }
   }
 
   /**
@@ -260,7 +201,7 @@ public abstract class DataInput implements Cloneable {
    * @see DataOutput#writeZLong(long)
    */
   public long readZLong() throws IOException {
-    return BitUtil.zigZagDecode(readVLong(true));
+    return BitUtil.zigZagDecode(readVLong());
   }
 
   /**
@@ -333,30 +274,6 @@ public abstract class DataInput implements Cloneable {
         set.add(readString());
       }
       return Collections.unmodifiableSet(set);
-    }
-  }
-
-  /**
-   * Skip over <code>numBytes</code> bytes. The contract on this method is that it should have the
-   * same behavior as reading the same number of bytes into a buffer and discarding its content.
-   * Negative values of <code>numBytes</code> are not supported.
-   *
-   * @deprecated Implementing subclasses should override #skipBytes with a more performant solution
-   *     where possible.
-   */
-  @Deprecated
-  protected void skipBytesSlowly(final long numBytes) throws IOException {
-    if (numBytes < 0) {
-      throw new IllegalArgumentException("numBytes must be >= 0, got " + numBytes);
-    }
-    if (skipBuffer == null) {
-      skipBuffer = new byte[SKIP_BUFFER_SIZE];
-    }
-    assert skipBuffer.length == SKIP_BUFFER_SIZE;
-    for (long skipped = 0; skipped < numBytes; ) {
-      final int step = (int) Math.min(SKIP_BUFFER_SIZE, numBytes - skipped);
-      readBytes(skipBuffer, 0, step, false);
-      skipped += step;
     }
   }
 

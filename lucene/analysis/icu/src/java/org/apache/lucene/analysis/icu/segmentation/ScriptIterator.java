@@ -51,7 +51,7 @@ import com.ibm.icu.text.UTF16;
  * @lucene.experimental
  */
 final class ScriptIterator {
-  private char text[];
+  private char[] text;
   private int start;
   private int limit;
   private int index;
@@ -62,7 +62,9 @@ final class ScriptIterator {
 
   private final boolean combineCJ;
 
-  /** @param combineCJ if true: Han,Hiragana,Katakana will all return as {@link UScript#JAPANESE} */
+  /**
+   * @param combineCJ if true: Han,Hiragana,Katakana will all return as {@link UScript#JAPANESE}
+   */
   ScriptIterator(boolean combineCJ) {
     this.combineCJ = combineCJ;
   }
@@ -150,7 +152,7 @@ final class ScriptIterator {
    * @param start offset into buffer
    * @param length maximum length to examine
    */
-  void setText(char text[], int start, int length) {
+  void setText(char[] text, int start, int length) {
     this.text = text;
     this.start = start;
     this.index = start;
@@ -161,7 +163,7 @@ final class ScriptIterator {
   }
 
   /** linear fast-path for basic latin case */
-  private static final int basicLatin[] = new int[128];
+  private static final int[] basicLatin = new int[128];
 
   static {
     for (int i = 0; i < basicLatin.length; i++) {

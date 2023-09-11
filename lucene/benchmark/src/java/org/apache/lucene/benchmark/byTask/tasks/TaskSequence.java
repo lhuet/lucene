@@ -20,6 +20,7 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.apache.lucene.benchmark.Constants;
 import org.apache.lucene.benchmark.byTask.PerfRunData;
 import org.apache.lucene.benchmark.byTask.feeds.NoMoreDataException;
 import org.apache.lucene.benchmark.byTask.stats.TaskStats;
@@ -82,12 +83,16 @@ public class TaskSequence extends PerfTask {
     }
   }
 
-  /** @return Returns the parallel. */
+  /**
+   * @return Returns the parallel.
+   */
   public boolean isParallel() {
     return parallel;
   }
 
-  /** @return Returns the repetitions. */
+  /**
+   * @return Returns the repetitions.
+   */
   public int getRepetitions() {
     return repetitions;
   }
@@ -99,7 +104,9 @@ public class TaskSequence extends PerfTask {
     fixedTime = true;
   }
 
-  /** @param repetitions The repetitions to set. */
+  /**
+   * @param repetitions The repetitions to set.
+   */
   public void setRepetitions(int repetitions) throws Exception {
     fixedTime = false;
     this.repetitions = repetitions;
@@ -111,7 +118,9 @@ public class TaskSequence extends PerfTask {
     setSequenceName();
   }
 
-  /** @return Returns the parent. */
+  /**
+   * @return Returns the parent.
+   */
   public TaskSequence getParent() {
     return parent;
   }
@@ -339,13 +348,24 @@ public class TaskSequence extends PerfTask {
     final TaskStats stats = getRunData().getPoints().getCurrentStats();
 
     initTasksArray();
-    ParallelTask t[] = runningParallelTasks = new ParallelTask[repetitions * tasks.size()];
+    ParallelTask[] t = runningParallelTasks = new ParallelTask[repetitions * tasks.size()];
+    // Get number of parallel threads from algo file and set it to use in ReuersContentSource.java's
+    // docCountArrInit()
+    this.getRunData().getConfig().setNumThreads(t.length);
     // prepare threads
     int index = 0;
     for (int k = 0; k < repetitions; k++) {
       for (int i = 0; i < tasksArray.length; i++) {
         final PerfTask task = tasksArray[i].clone();
-        t[index++] = new ParallelTask(task);
+        t[index] = new ParallelTask(task);
+        // Setting unique ThreadName with index value which is used in ReuersContentSource.java's
+        // getNextDocData().Please make changes
+        // in ReuersContentSource.java's getNextDocData() for
+        // Integer.parseInt(Thread.currentThread().getName().substring(parallelTaskThreadSize + 1,
+        // threadIndexSize))
+        // before making any modifications here
+        t[index].setName(Constants.PARALLEL_TASK_THREAD_NAME_PREFIX + "-" + index);
+        index++;
       }
     }
     // run threads
@@ -472,7 +492,9 @@ public class TaskSequence extends PerfTask {
     return (perMin ? rate : 60 * rate);
   }
 
-  /** @param rate The rate to set. */
+  /**
+   * @param rate The rate to set.
+   */
   public void setRate(int rate, boolean perMin) {
     this.rate = rate;
     this.perMin = perMin;
@@ -499,7 +521,9 @@ public class TaskSequence extends PerfTask {
     return seqName; // override to include more info
   }
 
-  /** @return Returns the tasks. */
+  /**
+   * @return Returns the tasks.
+   */
   public ArrayList<PerfTask> getTasks() {
     return tasks;
   }

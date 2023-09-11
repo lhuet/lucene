@@ -23,7 +23,6 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 
 /**
@@ -68,18 +67,24 @@ public final class DisjunctionMaxQuery extends Query implements Iterable<Query> 
     this.disjuncts.addAll(disjuncts);
   }
 
-  /** @return An {@code Iterator<Query>} over the disjuncts */
+  /**
+   * @return An {@code Iterator<Query>} over the disjuncts
+   */
   @Override
   public Iterator<Query> iterator() {
     return getDisjuncts().iterator();
   }
 
-  /** @return the disjuncts. */
+  /**
+   * @return the disjuncts.
+   */
   public Collection<Query> getDisjuncts() {
     return Collections.unmodifiableCollection(disjuncts);
   }
 
-  /** @return tie breaker value for multiple matches. */
+  /**
+   * @return tie breaker value for multiple matches.
+   */
   public float getTieBreakerMultiplier() {
     return tieBreakerMultiplier;
   }
@@ -146,7 +151,8 @@ public final class DisjunctionMaxQuery extends Query implements Iterable<Query> 
 
     @Override
     public boolean isCacheable(LeafReaderContext ctx) {
-      if (weights.size() > TermInSetQuery.BOOLEAN_REWRITE_TERM_COUNT_THRESHOLD) {
+      if (weights.size()
+          > AbstractMultiTermQueryConstantScoreWrapper.BOOLEAN_REWRITE_TERM_COUNT_THRESHOLD) {
         // Disallow caching large dismax queries to not encourage users
         // to build large dismax queries as a workaround to the fact that
         // we disallow caching large TermInSetQueries.
@@ -202,11 +208,14 @@ public final class DisjunctionMaxQuery extends Query implements Iterable<Query> 
   /**
    * Optimize our representation and our subqueries representations
    *
-   * @param reader the IndexReader we query
    * @return an optimized copy of us (which may not be a copy if there is nothing to optimize)
    */
   @Override
-  public Query rewrite(IndexReader reader) throws IOException {
+  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
+    if (disjuncts.isEmpty()) {
+      return new MatchNoDocsQuery("empty DisjunctionMaxQuery");
+    }
+
     if (disjuncts.size() == 1) {
       return disjuncts.iterator().next();
     }
@@ -222,7 +231,7 @@ public final class DisjunctionMaxQuery extends Query implements Iterable<Query> 
     boolean actuallyRewritten = false;
     List<Query> rewrittenDisjuncts = new ArrayList<>();
     for (Query sub : disjuncts) {
-      Query rewrittenSub = sub.rewrite(reader);
+      Query rewrittenSub = sub.rewrite(indexSearcher);
       actuallyRewritten |= rewrittenSub != sub;
       rewrittenDisjuncts.add(rewrittenSub);
     }
@@ -231,7 +240,7 @@ public final class DisjunctionMaxQuery extends Query implements Iterable<Query> 
       return new DisjunctionMaxQuery(rewrittenDisjuncts, tieBreakerMultiplier);
     }
 
-    return super.rewrite(reader);
+    return super.rewrite(indexSearcher);
   }
 
   @Override

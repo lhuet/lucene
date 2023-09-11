@@ -27,6 +27,7 @@ import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.PriorityQueue;
 
 /**
  * Lucene 9.0 compound file format
@@ -60,7 +61,8 @@ import org.apache.lucene.store.IndexOutput;
  *   <li>FileCount indicates how many files are contained in this compound file. The entry table
  *       that follows has that many entries.
  *   <li>Each directory entry contains a long pointer to the start of this file's data section, the
- *       files length, and a String with that file's name.
+ *       files length, and a String with that file's name. The start of file's data section is
+ *       aligned to 8 bytes to not introduce additional unaligned accesses with mmap.
  * </ul>
  */
 public final class Lucene90CompoundFormat extends CompoundFormat {
@@ -101,14 +103,44 @@ public final class Lucene90CompoundFormat extends CompoundFormat {
     }
   }
 
+  private static class SizedFile {
+    private final String name;
+    private final long length;
+
+    private SizedFile(String name, long length) {
+      this.name = name;
+      this.length = length;
+    }
+  }
+
+  private static class SizedFileQueue extends PriorityQueue<SizedFile> {
+    SizedFileQueue(int maxSize) {
+      super(maxSize);
+    }
+
+    @Override
+    protected boolean lessThan(SizedFile sf1, SizedFile sf2) {
+      return sf1.length < sf2.length;
+    }
+  }
+
   private void writeCompoundFile(
       IndexOutput entries, IndexOutput data, Directory dir, SegmentInfo si) throws IOException {
     // write number of files
-    entries.writeVInt(si.files().size());
-    for (String file : si.files()) {
+    int numFiles = si.files().size();
+    entries.writeVInt(numFiles);
+    // first put files in ascending size order so small files fit more likely into one page
+    SizedFileQueue pq = new SizedFileQueue(numFiles);
+    for (String filename : si.files()) {
+      pq.add(new SizedFile(filename, dir.fileLength(filename)));
+    }
+    while (pq.size() > 0) {
+      SizedFile sizedFile = pq.pop();
+      String file = sizedFile.name;
+      // align file start offset
+      long startOffset = data.alignFilePointer(Long.BYTES);
       // write bytes for file
-      long startOffset = data.getFilePointer();
-      try (ChecksumIndexInput in = dir.openChecksumInput(file, IOContext.READONCE)) {
+      try (ChecksumIndexInput in = dir.openChecksumInput(file)) {
 
         // just copies the index header, verifying that its id matches what we expect
         CodecUtil.verifyAndCopyIndexHeader(in, data, si.getId());

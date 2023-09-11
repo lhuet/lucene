@@ -26,8 +26,17 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.search.*;
 import org.apache.lucene.search.BooleanClause.Occur;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.BoostQuery;
+import org.apache.lucene.search.ConstantScoreQuery;
+import org.apache.lucene.search.DisjunctionMaxQuery;
+import org.apache.lucene.search.Explanation;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.Directory;
 
 /** TestExplanations subclass focusing on span queries */
@@ -46,11 +55,6 @@ public class TestSpanExplanations extends BaseSpanExplanationTestCase {
     qtest(new BoostQuery(q, 1000), new int[] {0, 1, 2, 3});
   }
 
-  public void testST3() throws Exception {
-    SpanQuery q = st("w1");
-    bqtest(new SpanBoostQuery(q, 0), new int[] {0, 1, 2, 3});
-  }
-
   public void testST4() throws Exception {
     SpanQuery q = st("xx");
     qtest(q, new int[] {2, 3});
@@ -59,11 +63,6 @@ public class TestSpanExplanations extends BaseSpanExplanationTestCase {
   public void testST5() throws Exception {
     SpanQuery q = st("xx");
     qtest(new BoostQuery(q, 1000), new int[] {2, 3});
-  }
-
-  public void testST6() throws Exception {
-    SpanQuery q = st("xx");
-    qtest(new SpanBoostQuery(q, 0), new int[] {2, 3});
   }
 
   /* some SpanFirstQueries */
@@ -76,11 +75,6 @@ public class TestSpanExplanations extends BaseSpanExplanationTestCase {
   public void testSF2() throws Exception {
     SpanQuery q = sf(("w1"), 1);
     qtest(new BoostQuery(q, 1000), new int[] {0, 1, 2, 3});
-  }
-
-  public void testSF3() throws Exception {
-    SpanQuery q = sf(("w1"), 1);
-    bqtest(new SpanBoostQuery(q, 0), new int[] {0, 1, 2, 3});
   }
 
   public void testSF4() throws Exception {
@@ -96,11 +90,6 @@ public class TestSpanExplanations extends BaseSpanExplanationTestCase {
   public void testSF6() throws Exception {
     SpanQuery q = sf(("yy"), 4);
     qtest(new BoostQuery(q, 1000), new int[] {2});
-  }
-
-  public void testSF7() throws Exception {
-    SpanQuery q = sf(("xx"), 3);
-    bqtest(new SpanBoostQuery(q, 0), new int[] {2, 3});
   }
 
   /* some SpanOrQueries */
@@ -194,11 +183,6 @@ public class TestSpanExplanations extends BaseSpanExplanationTestCase {
     qtest(new BoostQuery(q, 1000), new int[] {0, 1, 2, 3});
   }
 
-  public void testSNot3() throws Exception {
-    SpanQuery q = snot(sf("w1", 10), st("QQ"));
-    bqtest(new SpanBoostQuery(q, 0), new int[] {0, 1, 2, 3});
-  }
-
   public void testSNot4() throws Exception {
     SpanQuery q = snot(sf("w1", 10), st("xx"));
     qtest(q, new int[] {0, 1, 2, 3});
@@ -209,30 +193,9 @@ public class TestSpanExplanations extends BaseSpanExplanationTestCase {
     qtest(new BoostQuery(q, 1000), new int[] {0, 1, 2, 3});
   }
 
-  public void testSNot6() throws Exception {
-    SpanQuery q = snot(sf("w1", 10), st("xx"));
-    bqtest(new SpanBoostQuery(q, 0), new int[] {0, 1, 2, 3});
-  }
-
   public void testSNot7() throws Exception {
     SpanQuery f = snear("w1", "w3", 10, true);
     SpanQuery q = snot(f, st("xx"));
-    qtest(q, new int[] {0, 1, 3});
-  }
-
-  public void testSNot8() throws Exception {
-    // NOTE: using qtest not bqtest
-    SpanQuery f = snear("w1", "w3", 10, true);
-    f = new SpanBoostQuery(f, 0);
-    SpanQuery q = snot(f, st("xx"));
-    qtest(q, new int[] {0, 1, 3});
-  }
-
-  public void testSNot9() throws Exception {
-    // NOTE: using qtest not bqtest
-    SpanQuery t = st("xx");
-    t = new SpanBoostQuery(t, 0);
-    SpanQuery q = snot(snear("w1", "w3", 10, true), t);
     qtest(q, new int[] {0, 1, 3});
   }
 

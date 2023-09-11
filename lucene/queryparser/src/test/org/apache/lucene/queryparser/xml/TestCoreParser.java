@@ -16,24 +16,30 @@
  */
 package org.apache.lucene.queryparser.xml;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.MockAnalyzer;
-import org.apache.lucene.analysis.MockTokenFilter;
-import org.apache.lucene.analysis.MockTokenizer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.queries.spans.SpanNearQuery;
 import org.apache.lucene.queries.spans.SpanQuery;
+import org.apache.lucene.queries.spans.SpanTermQuery;
+import org.apache.lucene.search.BoostQuery;
 import org.apache.lucene.search.DisjunctionMaxQuery;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.tests.analysis.MockAnalyzer;
+import org.apache.lucene.tests.analysis.MockTokenFilter;
+import org.apache.lucene.tests.analysis.MockTokenizer;
+import org.apache.lucene.tests.util.LuceneTestCase;
 import org.junit.AfterClass;
 import org.xml.sax.SAXException;
 
@@ -201,6 +207,39 @@ public class TestCoreParser extends LuceneTestCase {
     dumpResults("PointRangeQueryWithoutRange", q, 5);
   }
 
+  public void testSpanBoosts() throws Exception {
+    String topLevel = "<SpanTerm fieldName=\"field\" boost=\"2\">value</SpanTerm>";
+    try (ByteArrayInputStream is =
+        new ByteArrayInputStream(topLevel.getBytes(StandardCharsets.UTF_8))) {
+      Query actual = coreParser().parse(is);
+      Query expected = new BoostQuery(new SpanTermQuery(new Term("field", "value")), 2);
+      assertEquals(expected, actual);
+    }
+
+    String nested =
+        "<SpanNear fieldName=\"field\" boost=\"2\" slop=\"8\" inOrder=\"false\">"
+            + // top level boost is preserved
+            " <SpanTerm boost=\"4\">value1</SpanTerm>"
+            + // interior boost is ignored
+            " <SpanTerm>value2</SpanTerm>"
+            + "</SpanNear>";
+    try (ByteArrayInputStream is =
+        new ByteArrayInputStream(nested.getBytes(StandardCharsets.UTF_8))) {
+      Query actual = coreParser().parse(is);
+      Query expected =
+          new BoostQuery(
+              new SpanNearQuery(
+                  new SpanQuery[] {
+                    new SpanTermQuery(new Term("field", "value1")),
+                    new SpanTermQuery(new Term("field", "value2"))
+                  },
+                  8,
+                  false),
+              2);
+      assertEquals(expected, actual);
+    }
+  }
+
   // ================= Helper methods ===================================
 
   protected String defaultField() {
@@ -277,7 +316,7 @@ public class TestCoreParser extends LuceneTestCase {
   }
 
   protected Query rewrite(Query q) throws IOException {
-    return q.rewrite(reader());
+    return q.rewrite(searcher());
   }
 
   protected void dumpResults(String qType, Query q, int numDocs) throws IOException {
@@ -308,8 +347,9 @@ public class TestCoreParser extends LuceneTestCase {
     }
     if (VERBOSE) {
       ScoreDoc[] scoreDocs = hits.scoreDocs;
+      StoredFields storedFields = searcher.storedFields();
       for (int i = 0; i < Math.min(numDocs, hits.totalHits.value); i++) {
-        Document ldoc = searcher.doc(scoreDocs[i].doc);
+        Document ldoc = storedFields.document(scoreDocs[i].doc);
         System.out.println("[" + ldoc.get("date") + "]" + ldoc.get("contents"));
       }
       System.out.println();

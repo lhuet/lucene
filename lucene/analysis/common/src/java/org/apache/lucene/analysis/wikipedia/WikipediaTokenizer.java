@@ -17,7 +17,11 @@
 package org.apache.lucene.analysis.wikipedia;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.FlagsAttribute;
@@ -26,6 +30,7 @@ import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.analysis.tokenattributes.TypeAttribute;
 import org.apache.lucene.util.AttributeFactory;
 import org.apache.lucene.util.AttributeSource;
+import org.apache.lucene.util.IgnoreRandomChains;
 
 /**
  * Extension of StandardTokenizer that is aware of Wikipedia syntax. It is based off of the
@@ -34,6 +39,7 @@ import org.apache.lucene.util.AttributeSource;
  *
  * @lucene.experimental
  */
+@IgnoreRandomChains(reason = "TODO: it seems to mess up offsets!?")
 public final class WikipediaTokenizer extends Tokenizer {
   public static final String INTERNAL_LINK = "il";
   public static final String EXTERNAL_LINK = "el";

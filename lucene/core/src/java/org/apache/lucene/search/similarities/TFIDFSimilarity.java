@@ -410,7 +410,7 @@ public abstract class TFIDFSimilarity extends Similarity {
    * @return an Explain object that includes both an idf score factor for the phrase and an
    *     explanation for each term.
    */
-  public Explanation idfExplain(CollectionStatistics collectionStats, TermStatistics termStats[]) {
+  public Explanation idfExplain(CollectionStatistics collectionStats, TermStatistics[] termStats) {
     double idf = 0d; // sum into a double before casting into a float
     List<Explanation> subs = new ArrayList<>();
     for (final TermStatistics stat : termStats) {
@@ -444,6 +444,15 @@ public abstract class TFIDFSimilarity extends Similarity {
    */
   public abstract float lengthNorm(int length);
 
+  /** Cache of decoded bytes. */
+  private static final int[] LENGTH_TABLE = new int[256];
+
+  static {
+    for (int i = 0; i < 256; i++) {
+      LENGTH_TABLE[i] = SmallFloat.byte4ToInt((byte) i);
+    }
+  }
+
   @Override
   public final long computeNorm(FieldInvertState state) {
     final int numTerms;
@@ -466,8 +475,7 @@ public abstract class TFIDFSimilarity extends Similarity {
             : idfExplain(collectionStats, termStats);
     float[] normTable = new float[256];
     for (int i = 1; i < 256; ++i) {
-      int length = SmallFloat.byte4ToInt((byte) i);
-      float norm = lengthNorm(length);
+      float norm = lengthNorm(LENGTH_TABLE[i]);
       normTable[i] = norm;
     }
     normTable[0] = 1f / normTable[255];

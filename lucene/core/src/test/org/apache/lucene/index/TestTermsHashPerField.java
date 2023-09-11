@@ -28,11 +28,12 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import org.apache.lucene.tests.util.LuceneTestCase;
+import org.apache.lucene.tests.util.TestUtil;
 import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Counter;
 import org.apache.lucene.util.IntBlockPool;
-import org.apache.lucene.util.LuceneTestCase;
 
 public class TestTermsHashPerField extends LuceneTestCase {
 
@@ -130,22 +131,22 @@ public class TestTermsHashPerField extends LuceneTestCase {
     TermsHashPerField hash = createNewHash(newCalled, addCalled);
     hash.start(null, true);
 
-    hash.add(new BytesRef("start"), 0); // tid = 0;
-    hash.add(new BytesRef("foo"), 0); // tid = 1;
-    hash.add(new BytesRef("bar"), 0); // tid = 2;
+    hash.add(newBytesRef("start"), 0); // tid = 0;
+    hash.add(newBytesRef("foo"), 0); // tid = 1;
+    hash.add(newBytesRef("bar"), 0); // tid = 2;
     hash.finish();
-    hash.add(new BytesRef("bar"), 1);
-    hash.add(new BytesRef("foobar"), 1); // tid = 3;
-    hash.add(new BytesRef("bar"), 1);
-    hash.add(new BytesRef("bar"), 1);
-    hash.add(new BytesRef("foobar"), 1);
-    hash.add(new BytesRef("verylongfoobarbaz"), 1); // tid = 4;
+    hash.add(newBytesRef("bar"), 1);
+    hash.add(newBytesRef("foobar"), 1); // tid = 3;
+    hash.add(newBytesRef("bar"), 1);
+    hash.add(newBytesRef("bar"), 1);
+    hash.add(newBytesRef("foobar"), 1);
+    hash.add(newBytesRef("verylongfoobarbaz"), 1); // tid = 4;
     hash.finish();
-    hash.add(new BytesRef("verylongfoobarbaz"), 2);
-    hash.add(new BytesRef("boom"), 2); // tid = 5;
+    hash.add(newBytesRef("verylongfoobarbaz"), 2);
+    hash.add(newBytesRef("boom"), 2); // tid = 5;
     hash.finish();
-    hash.add(new BytesRef("verylongfoobarbaz"), 3);
-    hash.add(new BytesRef("end"), 3); // tid = 6;
+    hash.add(newBytesRef("verylongfoobarbaz"), 3);
+    hash.add(newBytesRef("end"), 3); // tid = 6;
     hash.finish();
 
     assertEquals(7, newCalled.get());
@@ -254,7 +255,7 @@ public class TestTermsHashPerField extends LuceneTestCase {
     for (int i = 0; i < numStrings; i++) {
       String randomString =
           RandomStrings.randomRealisticUnicodeOfCodepointLengthBetween(random(), 1, 10);
-      postingMap.putIfAbsent(new BytesRef(randomString), new Posting());
+      postingMap.putIfAbsent(newBytesRef(randomString), new Posting());
     }
     List<BytesRef> bytesRefs = Arrays.asList(postingMap.keySet().toArray(new BytesRef[0]));
     Collections.sort(bytesRefs);
@@ -296,6 +297,30 @@ public class TestTermsHashPerField extends LuceneTestCase {
         prefDoc = entry.getKey();
       }
       assertTrue("the last posting must be EOF on the reader", eof);
+    }
+  }
+
+  public void testWriteBytes() throws IOException {
+    for (int i = 0; i < 100; i++) {
+      AtomicInteger newCalled = new AtomicInteger(0);
+      AtomicInteger addCalled = new AtomicInteger(0);
+      TermsHashPerField hash = createNewHash(newCalled, addCalled);
+      hash.start(null, true);
+      hash.add(newBytesRef("start"), 0); // tid = 0;
+      int size = TestUtil.nextInt(random(), 50000, 100000);
+      byte[] randomData = new byte[size];
+      random().nextBytes(randomData);
+      int offset = 0;
+      while (offset < randomData.length) {
+        int writeLength = Math.min(randomData.length - offset, TestUtil.nextInt(random(), 1, 200));
+        hash.writeBytes(0, randomData, offset, writeLength);
+        offset += writeLength;
+      }
+      ByteSliceReader reader = new ByteSliceReader();
+      reader.init(hash.bytePool, 0, hash.bytePool.byteOffset + hash.bytePool.byteUpto);
+      for (byte expected : randomData) {
+        assertEquals(expected, reader.readByte());
+      }
     }
   }
 }

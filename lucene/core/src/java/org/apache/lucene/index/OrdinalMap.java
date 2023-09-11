@@ -171,7 +171,7 @@ public class OrdinalMap implements Accountable {
    * @throws IOException if an I/O error occurred.
    */
   public static OrdinalMap build(
-      IndexReader.CacheKey owner, TermsEnum subs[], long[] weights, float acceptableOverheadRatio)
+      IndexReader.CacheKey owner, TermsEnum[] subs, long[] weights, float acceptableOverheadRatio)
       throws IOException {
     if (subs.length != weights.length) {
       throw new IllegalArgumentException("subs and weights must have the same length");
@@ -189,13 +189,13 @@ public class OrdinalMap implements Accountable {
   public final IndexReader.CacheKey owner;
   // number of global ordinals
   final long valueCount;
-  // globalOrd -> (globalOrd - segmentOrd) where segmentOrd is the the ordinal in the first segment
+  // globalOrd -> (globalOrd - segmentOrd) where segmentOrd is the ordinal in the first segment
   // that contains this term
   final LongValues globalOrdDeltas;
   // globalOrd -> first segment container
   final LongValues firstSegments;
   // for every segment, segmentOrd -> globalOrd
-  final LongValues segmentToGlobalOrds[];
+  final LongValues[] segmentToGlobalOrds;
   // the map from/to segment ids
   final SegmentMap segmentMap;
   // ram usage
@@ -203,7 +203,7 @@ public class OrdinalMap implements Accountable {
 
   OrdinalMap(
       IndexReader.CacheKey owner,
-      TermsEnum subs[],
+      TermsEnum[] subs,
       SegmentMap segmentMap,
       float acceptableOverheadRatio)
       throws IOException {

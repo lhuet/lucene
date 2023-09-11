@@ -21,6 +21,7 @@ import java.io.StringReader;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -29,8 +30,6 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.CharArraySet;
-import org.apache.lucene.analysis.MockAnalyzer;
-import org.apache.lucene.analysis.MockTokenizer;
 import org.apache.lucene.analysis.StopFilter;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
@@ -42,18 +41,21 @@ import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.suggest.Input;
 import org.apache.lucene.search.suggest.InputArrayIterator;
 import org.apache.lucene.search.suggest.Lookup.LookupResult;
+import org.apache.lucene.search.suggest.SuggestRebuildTestUtil;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.tests.analysis.MockAnalyzer;
+import org.apache.lucene.tests.analysis.MockTokenizer;
+import org.apache.lucene.tests.util.LuceneTestCase;
+import org.apache.lucene.tests.util.TestUtil;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.LuceneTestCase;
-import org.apache.lucene.util.TestUtil;
 import org.junit.Test;
 
 public class TestAnalyzingInfixSuggester extends LuceneTestCase {
 
   public void testBasic() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("lend me your ear", 8, new BytesRef("foobar")),
           new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz")),
@@ -152,7 +154,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
   }
 
   public void testAfterLoad() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("lend me your ear", 8, new BytesRef("foobar")),
           new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz")),
@@ -180,6 +182,51 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
     a.close();
   }
 
+  public void testLookupsDuringReBuild() throws Exception {
+    Analyzer a = new MockAnalyzer(random(), MockTokenizer.WHITESPACE, false);
+    AnalyzingInfixSuggester suggester = new AnalyzingInfixSuggester(newDirectory(), a, a, 3, false);
+
+    SuggestRebuildTestUtil.testLookupsDuringReBuild(
+        suggester,
+        Arrays.asList(
+            new Input("lend me your ear", 8, new BytesRef("foobar")),
+            new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz"))),
+        s -> {
+          assertEquals(2, s.getCount());
+          List<LookupResult> results =
+              s.lookup(
+                  TestUtil.stringToCharSequence("ear", random()),
+                  (BooleanQuery) null,
+                  10,
+                  true,
+                  true);
+          assertEquals(2, results.size());
+          assertEquals("a penny saved is a penny earned", results.get(0).key);
+          assertEquals("a penny saved is a penny <b>ear</b>ned", results.get(0).highlightKey);
+          assertEquals(10, results.get(0).value);
+          assertEquals(new BytesRef("foobaz"), results.get(0).payload);
+        },
+        Arrays.asList(new Input("earned run average", 42, new BytesRef("yakbaz"))),
+        s -> {
+          assertEquals(3, s.getCount());
+          List<LookupResult> results =
+              s.lookup(
+                  TestUtil.stringToCharSequence("ear", random()),
+                  (BooleanQuery) null,
+                  10,
+                  true,
+                  true);
+          assertEquals(3, results.size());
+          assertEquals("earned run average", results.get(0).key);
+          assertEquals("<b>ear</b>ned run average", results.get(0).highlightKey);
+          assertEquals(42, results.get(0).value);
+          assertEquals(new BytesRef("yakbaz"), results.get(0).payload);
+        });
+
+    suggester.close();
+    a.close();
+  }
+
   /** Used to return highlighted result; see {@link LookupResult#highlightKey} */
   private static final class LookupHighlightFragment {
     /** Portion of text for this fragment. */
@@ -202,7 +249,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
 
   @SuppressWarnings("unchecked")
   public void testHighlightAsObject() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz")),
         };
@@ -290,7 +337,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
   }
 
   public void testRandomMinPrefixLength() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("lend me your ear", 8, new BytesRef("foobar")),
           new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz")),
@@ -367,7 +414,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
   }
 
   public void testHighlight() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz")),
         };
@@ -385,7 +432,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
   }
 
   public void testHighlightCaseChange() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("a Penny saved is a penny earned", 10, new BytesRef("foobaz")),
         };
@@ -422,7 +469,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
   }
 
   public void testDoubleClose() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz")),
         };
@@ -458,7 +505,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
     AnalyzingInfixSuggester suggester =
         new AnalyzingInfixSuggester(newDirectory(), indexAnalyzer, queryAnalyzer, 3, false);
 
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("a bob for apples", 10, new BytesRef("foobaz")),
         };
@@ -589,7 +636,6 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
     }
   }
 
-  @Slow
   public void testRandomNRT() throws Exception {
     final Path tempDir = createTempDir("AnalyzingInfixSuggesterTest");
     Analyzer a = new MockAnalyzer(random(), MockTokenizer.WHITESPACE, false);
@@ -861,7 +907,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
   }
 
   public void testBasicNRT() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("lend me your ear", 8, new BytesRef("foobar")),
         };
@@ -1025,7 +1071,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
 
   // LUCENE-5528 and LUCENE-6464
   public void testBasicContext() throws Exception {
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("lend me your ear", 8, new BytesRef("foobar"), asSet("foo", "bar")),
           new Input(
@@ -1320,7 +1366,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
     byte[] context3 = new byte[1];
     context3[0] = (byte) 0xff;
 
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("lend me your ear", 8, new BytesRef("foobar"), asSet(context1, context2)),
           new Input(
@@ -1376,7 +1422,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
 
   public void testContextNotAllTermsRequired() throws Exception {
 
-    Input keys[] =
+    Input[] keys =
         new Input[] {
           new Input("lend me your ear", 8, new BytesRef("foobar"), asSet("foo", "bar")),
           new Input(
@@ -1561,7 +1607,7 @@ public class TestAnalyzingInfixSuggester extends LuceneTestCase {
         suggester -> expectThrows(IllegalStateException.class, suggester::refresh));
   }
 
-  private Input sharedInputs[] =
+  private Input[] sharedInputs =
       new Input[] {
         new Input("lend me your ear", 8, new BytesRef("foobar")),
         new Input("a penny saved is a penny earned", 10, new BytesRef("foobaz")),

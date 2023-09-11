@@ -197,7 +197,7 @@ public final class ByteBlockPool implements Accountable {
     bufferUpto++;
 
     byteUpto = 0;
-    byteOffset += BYTE_BLOCK_SIZE;
+    byteOffset = Math.addExact(byteOffset, BYTE_BLOCK_SIZE);
   }
 
   /**
@@ -240,7 +240,15 @@ public final class ByteBlockPool implements Accountable {
    * pool.
    */
   public int allocSlice(final byte[] slice, final int upto) {
+    return allocKnownSizeSlice(slice, upto) >> 8;
+  }
 
+  /**
+   * Create a new byte slice with the given starting size return the slice offset in the pool and
+   * length. The lower 8 bits of the returned int represent the length of the slice, and the upper
+   * 24 bits represent the offset.
+   */
+  public int allocKnownSizeSlice(final byte[] slice, final int upto) {
     final int level = slice[upto] & 15;
     final int newLevel = NEXT_LEVEL_ARRAY[level];
     final int newSize = LEVEL_SIZE_ARRAY[newLevel];
@@ -254,22 +262,21 @@ public final class ByteBlockPool implements Accountable {
     final int offset = newUpto + byteOffset;
     byteUpto += newSize;
 
-    // Copy forward the past 3 bytes (which we are about
-    // to overwrite with the forwarding address):
-    buffer[newUpto] = slice[upto - 3];
-    buffer[newUpto + 1] = slice[upto - 2];
-    buffer[newUpto + 2] = slice[upto - 1];
+    // Copy forward the past 3 bytes (which we are about to overwrite with the forwarding address).
+    // We actually copy 4 bytes at once since VarHandles make it cheap.
+    int past3Bytes = ((int) BitUtil.VH_LE_INT.get(slice, upto - 3)) & 0xFFFFFF;
+    // Ensure we're not changing the content of `buffer` by setting 4 bytes instead of 3. This
+    // should never happen since the next `newSize` bytes must be equal to 0.
+    assert buffer[newUpto + 3] == 0;
+    BitUtil.VH_LE_INT.set(buffer, newUpto, past3Bytes);
 
     // Write forwarding address at end of last slice:
-    slice[upto - 3] = (byte) (offset >>> 24);
-    slice[upto - 2] = (byte) (offset >>> 16);
-    slice[upto - 1] = (byte) (offset >>> 8);
-    slice[upto] = (byte) offset;
+    BitUtil.VH_LE_INT.set(slice, upto - 3, offset);
 
     // Write new level:
     buffer[byteUpto - 1] = (byte) (16 | newLevel);
 
-    return newUpto + 3;
+    return ((newUpto + 3) << 8) | (newSize - 3);
   }
 
   /**
@@ -308,7 +315,7 @@ public final class ByteBlockPool implements Accountable {
       term.offset = pos + 1;
     } else {
       // length is 2 bytes
-      term.length = (bytes[pos] & 0x7f) + ((bytes[pos + 1] & 0xff) << 7);
+      term.length = ((short) BitUtil.VH_BE_SHORT.get(bytes, pos)) & 0x7FFF;
       term.offset = pos + 2;
     }
     assert term.length >= 0;
@@ -343,7 +350,7 @@ public final class ByteBlockPool implements Accountable {
    *
    * <p>Note: this method allows to copy across block boundaries.
    */
-  public void readBytes(final long offset, final byte bytes[], int bytesOffset, int bytesLength) {
+  public void readBytes(final long offset, final byte[] bytes, int bytesOffset, int bytesLength) {
     int bytesLeft = bytesLength;
     int bufferIndex = (int) (offset >> BYTE_BLOCK_SHIFT);
     int pos = (int) (offset & BYTE_BLOCK_MASK);
@@ -375,14 +382,6 @@ public final class ByteBlockPool implements Accountable {
       ref.offset = 0;
       readBytes(offset, ref.bytes, 0, ref.length);
     }
-  }
-
-  /** Read a single byte at the given {@code offset}. */
-  public byte readByte(long offset) {
-    int bufferIndex = (int) (offset >> BYTE_BLOCK_SHIFT);
-    int pos = (int) (offset & BYTE_BLOCK_MASK);
-    byte[] buffer = buffers[bufferIndex];
-    return buffer[pos];
   }
 
   @Override

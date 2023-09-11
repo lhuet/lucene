@@ -26,14 +26,15 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import org.apache.lucene.tests.util.LuceneTestCase;
+import org.apache.lucene.tests.util.TestUtil;
+import org.apache.lucene.tests.util.automaton.AutomatonTestUtil;
+import org.apache.lucene.tests.util.automaton.AutomatonTestUtil.RandomAcceptedStrings;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.IntsRef;
 import org.apache.lucene.util.IntsRefBuilder;
-import org.apache.lucene.util.LuceneTestCase;
-import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.UnicodeUtil;
-import org.apache.lucene.util.automaton.AutomatonTestUtil.RandomAcceptedStrings;
 import org.apache.lucene.util.fst.Util;
 
 public class TestAutomaton extends LuceneTestCase {
@@ -223,7 +224,7 @@ public class TestAutomaton extends LuceneTestCase {
     assertTrue(Operations.run(a, "mn"));
     assertTrue(Operations.run(a, "mone"));
     assertFalse(Operations.run(a, "m"));
-    assertFalse(Operations.isFinite(a));
+    assertFalse(AutomatonTestUtil.isFinite(a));
   }
 
   public void testUnion1() throws Exception {
@@ -364,33 +365,33 @@ public class TestAutomaton extends LuceneTestCase {
   }
 
   public void testCommonSuffixEmpty() throws Exception {
-    assertEquals(new BytesRef(), Operations.getCommonSuffixBytesRef(Automata.makeEmpty()));
+    assertEquals(newBytesRef(), Operations.getCommonSuffixBytesRef(Automata.makeEmpty()));
   }
 
   public void testCommonSuffixEmptyString() throws Exception {
-    assertEquals(new BytesRef(), Operations.getCommonSuffixBytesRef(Automata.makeEmptyString()));
+    assertEquals(newBytesRef(), Operations.getCommonSuffixBytesRef(Automata.makeEmptyString()));
   }
 
   public void testCommonSuffixTrailingWildcard() throws Exception {
     Automaton a = Operations.concatenate(Automata.makeString("boo"), Automata.makeAnyChar());
-    assertEquals(new BytesRef(), Operations.getCommonSuffixBytesRef(a));
+    assertEquals(newBytesRef(), Operations.getCommonSuffixBytesRef(a));
   }
 
   public void testCommonSuffixLeadingKleenStar() throws Exception {
     Automaton a = Operations.concatenate(Automata.makeAnyString(), Automata.makeString("boo"));
-    assertEquals(new BytesRef("boo"), Operations.getCommonSuffixBytesRef(a));
+    assertEquals(newBytesRef("boo"), Operations.getCommonSuffixBytesRef(a));
   }
 
   public void testCommonSuffixTrailingKleenStar() throws Exception {
     Automaton a = Operations.concatenate(Automata.makeString("boo"), Automata.makeAnyString());
-    assertEquals(new BytesRef(), Operations.getCommonSuffixBytesRef(a));
+    assertEquals(newBytesRef(), Operations.getCommonSuffixBytesRef(a));
   }
 
   public void testCommonSuffixUnicode() throws Exception {
     Automaton a =
         Operations.concatenate(Automata.makeAnyString(), Automata.makeString("boo😂😂😂"));
     Automaton binary = new UTF32ToUTF8().convert(a);
-    assertEquals(new BytesRef("boo😂😂😂"), Operations.getCommonSuffixBytesRef(binary));
+    assertEquals(newBytesRef("boo😂😂😂"), Operations.getCommonSuffixBytesRef(binary));
   }
 
   public void testReverseRandom1() throws Exception {
@@ -828,7 +829,7 @@ public class TestAutomaton extends LuceneTestCase {
 
     Set<BytesRef> terms = new HashSet<>();
     while (terms.size() < numTerms) {
-      terms.add(new BytesRef(getRandomString()));
+      terms.add(newBytesRef(getRandomString()));
     }
 
     Automaton a = unionTerms(terms);
@@ -858,7 +859,7 @@ public class TestAutomaton extends LuceneTestCase {
               System.out.println("  op=concat prefix");
             }
             Set<BytesRef> newTerms = new HashSet<>();
-            BytesRef prefix = new BytesRef(getRandomString());
+            BytesRef prefix = newBytesRef(getRandomString());
             BytesRefBuilder newTerm = new BytesRefBuilder();
             for (BytesRef term : terms) {
               newTerm.copyBytes(prefix);
@@ -875,7 +876,7 @@ public class TestAutomaton extends LuceneTestCase {
         case 1:
           // concatenate suffix
           {
-            BytesRef suffix = new BytesRef(getRandomString());
+            BytesRef suffix = newBytesRef(getRandomString());
             if (VERBOSE) {
               System.out.println("  op=concat suffix " + suffix);
             }
@@ -921,7 +922,7 @@ public class TestAutomaton extends LuceneTestCase {
             Set<BytesRef> newTerms = new HashSet<>();
             int numNewTerms = random().nextInt(5);
             while (newTerms.size() < numNewTerms) {
-              newTerms.add(new BytesRef(getRandomString()));
+              newTerms.add(newBytesRef(getRandomString()));
             }
             terms.addAll(newTerms);
             Automaton newA = unionTerms(newTerms);
@@ -937,7 +938,7 @@ public class TestAutomaton extends LuceneTestCase {
             }
             // NOTE: This can add a dead state:
             a = Operations.optional(a);
-            terms.add(new BytesRef());
+            terms.add(newBytesRef());
           }
           break;
 
@@ -954,7 +955,7 @@ public class TestAutomaton extends LuceneTestCase {
               int numToRemove = TestUtil.nextInt(random(), 1, (terms.size() + 1) / 2);
               while (toRemove.size() < numToRemove) {
                 int[] ints = rasl.getRandomAcceptedString(random());
-                BytesRef term = new BytesRef(UnicodeUtil.newString(ints, 0, ints.length));
+                BytesRef term = newBytesRef(UnicodeUtil.newString(ints, 0, ints.length));
                 if (toRemove.contains(term) == false) {
                   toRemove.add(term);
                 }
@@ -1026,7 +1027,7 @@ public class TestAutomaton extends LuceneTestCase {
               System.out.println("  prefixes=" + prefixes);
             }
 
-            for (int prefix : prefixes) {
+            for (int prefix : prefixes.stream().mapToInt(Integer::intValue).toArray()) {
               // prefix is a leading ascii byte; we retain <prefix>* in a
               Automaton a2 = new Automaton();
               int init = a2.createState();
@@ -1074,7 +1075,7 @@ public class TestAutomaton extends LuceneTestCase {
             Set<BytesRef> newTerms = new HashSet<>();
             for (BytesRef term : terms) {
               newTerms.add(
-                  new BytesRef(new StringBuilder(term.utf8ToString()).reverse().toString()));
+                  newBytesRef(new StringBuilder(term.utf8ToString()).reverse().toString()));
             }
             terms = newTerms;
           }
@@ -1110,7 +1111,7 @@ public class TestAutomaton extends LuceneTestCase {
                 // Left-fill with 0s
                 s = prefix.substring(s.length()) + s;
               }
-              terms.add(new BytesRef(s));
+              terms.add(newBytesRef(s));
             }
           }
           break;
@@ -1120,7 +1121,7 @@ public class TestAutomaton extends LuceneTestCase {
             System.out.println("  op=remove the empty string");
           }
           a = Operations.minus(a, Automata.makeEmptyString(), DEFAULT_DETERMINIZE_WORK_LIMIT);
-          terms.remove(new BytesRef());
+          terms.remove(newBytesRef());
           break;
 
         case 13:
@@ -1128,7 +1129,7 @@ public class TestAutomaton extends LuceneTestCase {
             System.out.println("  op=add the empty string");
           }
           a = Operations.union(a, Automata.makeEmptyString());
-          terms.add(new BytesRef());
+          terms.add(newBytesRef());
           break;
 
         case 14:
@@ -1140,7 +1141,7 @@ public class TestAutomaton extends LuceneTestCase {
             int count = random().nextBoolean() ? 2 : 3;
             Set<BytesRef> addTerms = new HashSet<>();
             while (addTerms.size() < count) {
-              addTerms.add(new BytesRef(getRandomString()));
+              addTerms.add(newBytesRef(getRandomString()));
             }
             if (VERBOSE) {
               for (BytesRef term : addTerms) {
@@ -1236,7 +1237,7 @@ public class TestAutomaton extends LuceneTestCase {
   private void assertSame(Collection<BytesRef> terms, Automaton a) {
 
     try {
-      assertTrue(Operations.isFinite(a));
+      assertTrue(AutomatonTestUtil.isFinite(a));
       assertFalse(Operations.isTotal(a));
 
       Automaton detA = Operations.determinize(a, DEFAULT_DETERMINIZE_WORK_LIMIT);
@@ -1352,50 +1353,50 @@ public class TestAutomaton extends LuceneTestCase {
     // 0 (incl) - 00 (incl)
     byte[] zeros = new byte[3];
     Automaton a =
-        makeBinaryInterval(new BytesRef(zeros, 0, 1), true, new BytesRef(zeros, 0, 2), true);
-    assertTrue(Operations.isFinite(a));
-    assertFalse(accepts(a, new BytesRef()));
-    assertTrue(accepts(a, new BytesRef(zeros, 0, 1)));
-    assertTrue(accepts(a, new BytesRef(zeros, 0, 2)));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 3)));
+        makeBinaryInterval(newBytesRef(zeros, 0, 1), true, newBytesRef(zeros, 0, 2), true);
+    assertTrue(AutomatonTestUtil.isFinite(a));
+    assertFalse(accepts(a, newBytesRef()));
+    assertTrue(accepts(a, newBytesRef(zeros, 0, 1)));
+    assertTrue(accepts(a, newBytesRef(zeros, 0, 2)));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 3)));
 
     // '' (incl) - 00 (incl)
-    a = makeBinaryInterval(new BytesRef(), true, new BytesRef(zeros, 0, 2), true);
-    assertTrue(Operations.isFinite(a));
-    assertTrue(accepts(a, new BytesRef()));
-    assertTrue(accepts(a, new BytesRef(zeros, 0, 1)));
-    assertTrue(accepts(a, new BytesRef(zeros, 0, 2)));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 3)));
+    a = makeBinaryInterval(newBytesRef(), true, newBytesRef(zeros, 0, 2), true);
+    assertTrue(AutomatonTestUtil.isFinite(a));
+    assertTrue(accepts(a, newBytesRef()));
+    assertTrue(accepts(a, newBytesRef(zeros, 0, 1)));
+    assertTrue(accepts(a, newBytesRef(zeros, 0, 2)));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 3)));
 
     // '' (excl) - 00 (incl)
-    a = makeBinaryInterval(new BytesRef(), false, new BytesRef(zeros, 0, 2), true);
-    assertTrue(Operations.isFinite(a));
-    assertFalse(accepts(a, new BytesRef()));
-    assertTrue(accepts(a, new BytesRef(zeros, 0, 1)));
-    assertTrue(accepts(a, new BytesRef(zeros, 0, 2)));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 3)));
+    a = makeBinaryInterval(newBytesRef(), false, newBytesRef(zeros, 0, 2), true);
+    assertTrue(AutomatonTestUtil.isFinite(a));
+    assertFalse(accepts(a, newBytesRef()));
+    assertTrue(accepts(a, newBytesRef(zeros, 0, 1)));
+    assertTrue(accepts(a, newBytesRef(zeros, 0, 2)));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 3)));
 
     // 0 (excl) - 00 (incl)
-    a = makeBinaryInterval(new BytesRef(zeros, 0, 1), false, new BytesRef(zeros, 0, 2), true);
-    assertTrue(Operations.isFinite(a));
-    assertFalse(accepts(a, new BytesRef()));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 1)));
-    assertTrue(accepts(a, new BytesRef(zeros, 0, 2)));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 3)));
+    a = makeBinaryInterval(newBytesRef(zeros, 0, 1), false, newBytesRef(zeros, 0, 2), true);
+    assertTrue(AutomatonTestUtil.isFinite(a));
+    assertFalse(accepts(a, newBytesRef()));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 1)));
+    assertTrue(accepts(a, newBytesRef(zeros, 0, 2)));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 3)));
 
     // 0 (excl) - 00 (excl)
-    a = makeBinaryInterval(new BytesRef(zeros, 0, 1), false, new BytesRef(zeros, 0, 2), false);
-    assertTrue(Operations.isFinite(a));
-    assertFalse(accepts(a, new BytesRef()));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 1)));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 2)));
-    assertFalse(accepts(a, new BytesRef(zeros, 0, 3)));
+    a = makeBinaryInterval(newBytesRef(zeros, 0, 1), false, newBytesRef(zeros, 0, 2), false);
+    assertTrue(AutomatonTestUtil.isFinite(a));
+    assertFalse(accepts(a, newBytesRef()));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 1)));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 2)));
+    assertFalse(accepts(a, newBytesRef(zeros, 0, 3)));
   }
 
   public void testMakeBinaryIntervalFiniteCasesRandom() throws Exception {
     int iters = atLeast(100);
     for (int iter = 0; iter < iters; iter++) {
-      BytesRef prefix = new BytesRef(TestUtil.randomRealisticUnicodeString(random()));
+      BytesRef prefix = newBytesRef(TestUtil.randomRealisticUnicodeString(random()));
 
       BytesRefBuilder b = new BytesRefBuilder();
       b.append(prefix);
@@ -1419,7 +1420,7 @@ public class TestAutomaton extends LuceneTestCase {
           makeBinaryInterval(
               minTerm, minInclusive,
               maxTerm, maxInclusive);
-      assertTrue(Operations.isFinite(a));
+      assertTrue(AutomatonTestUtil.isFinite(a));
       int expectedCount = maxTerm.length - minTerm.length + 1;
       if (minInclusive == false) {
         expectedCount--;
@@ -1496,12 +1497,12 @@ public class TestAutomaton extends LuceneTestCase {
 
   private static IntsRef intsRef(String s) {
     IntsRefBuilder intsBuilder = new IntsRefBuilder();
-    Util.toIntsRef(new BytesRef(s), intsBuilder);
+    Util.toIntsRef(newBytesRef(s), intsBuilder);
     return intsBuilder.toIntsRef();
   }
 
   public void testMakeBinaryIntervalBasic() throws Exception {
-    Automaton a = Automata.makeBinaryInterval(new BytesRef("bar"), true, new BytesRef("foo"), true);
+    Automaton a = Automata.makeBinaryInterval(newBytesRef("bar"), true, newBytesRef("foo"), true);
     assertTrue(Operations.run(a, intsRef("bar")));
     assertTrue(Operations.run(a, intsRef("foo")));
     assertTrue(Operations.run(a, intsRef("beep")));
@@ -1510,14 +1511,14 @@ public class TestAutomaton extends LuceneTestCase {
   }
 
   public void testMakeBinaryIntervalLowerBoundEmptyString() throws Exception {
-    Automaton a = Automata.makeBinaryInterval(new BytesRef(""), true, new BytesRef("bar"), true);
+    Automaton a = Automata.makeBinaryInterval(newBytesRef(""), true, newBytesRef("bar"), true);
     assertTrue(Operations.run(a, intsRef("")));
     assertTrue(Operations.run(a, intsRef("a")));
     assertTrue(Operations.run(a, intsRef("bar")));
     assertFalse(Operations.run(a, intsRef("bara")));
     assertFalse(Operations.run(a, intsRef("baz")));
 
-    a = Automata.makeBinaryInterval(new BytesRef(""), false, new BytesRef("bar"), true);
+    a = Automata.makeBinaryInterval(newBytesRef(""), false, newBytesRef("bar"), true);
     assertFalse(Operations.run(a, intsRef("")));
     assertTrue(Operations.run(a, intsRef("a")));
     assertTrue(Operations.run(a, intsRef("bar")));
@@ -1526,15 +1527,15 @@ public class TestAutomaton extends LuceneTestCase {
   }
 
   public void testMakeBinaryIntervalEqual() throws Exception {
-    Automaton a = Automata.makeBinaryInterval(new BytesRef("bar"), true, new BytesRef("bar"), true);
+    Automaton a = Automata.makeBinaryInterval(newBytesRef("bar"), true, newBytesRef("bar"), true);
     assertTrue(Operations.run(a, intsRef("bar")));
-    assertTrue(Operations.isFinite(a));
+    assertTrue(AutomatonTestUtil.isFinite(a));
     assertEquals(1, TestOperations.getFiniteStrings(a).size());
   }
 
   public void testMakeBinaryIntervalCommonPrefix() throws Exception {
     Automaton a =
-        Automata.makeBinaryInterval(new BytesRef("bar"), true, new BytesRef("barfoo"), true);
+        Automata.makeBinaryInterval(newBytesRef("bar"), true, newBytesRef("barfoo"), true);
     assertFalse(Operations.run(a, intsRef("bam")));
     assertTrue(Operations.run(a, intsRef("bar")));
     assertTrue(Operations.run(a, intsRef("bara")));
@@ -1553,7 +1554,7 @@ public class TestAutomaton extends LuceneTestCase {
   }
 
   public void testMakeBinaryIntervalOpenMax() throws Exception {
-    Automaton a = Automata.makeBinaryInterval(new BytesRef("bar"), true, null, true);
+    Automaton a = Automata.makeBinaryInterval(newBytesRef("bar"), true, null, true);
     assertFalse(Operations.run(a, intsRef("bam")));
     assertTrue(Operations.run(a, intsRef("bar")));
     assertTrue(Operations.run(a, intsRef("bara")));
@@ -1568,19 +1569,19 @@ public class TestAutomaton extends LuceneTestCase {
 
   public void testMakeBinaryIntervalOpenMaxZeroLengthMin() throws Exception {
     // when including min, automaton should accept "a"
-    Automaton a = Automata.makeBinaryInterval(new BytesRef(""), true, null, true);
+    Automaton a = Automata.makeBinaryInterval(newBytesRef(""), true, null, true);
     assertTrue(Operations.run(a, intsRef("")));
     assertTrue(Operations.run(a, intsRef("a")));
     assertTrue(Operations.run(a, intsRef("aaaaaa")));
     // excluding min should still accept "a"
-    a = Automata.makeBinaryInterval(new BytesRef(""), false, null, true);
+    a = Automata.makeBinaryInterval(newBytesRef(""), false, null, true);
     assertFalse(Operations.run(a, intsRef("")));
     assertTrue(Operations.run(a, intsRef("a")));
     assertTrue(Operations.run(a, intsRef("aaaaaa")));
   }
 
   public void testMakeBinaryIntervalOpenMin() throws Exception {
-    Automaton a = Automata.makeBinaryInterval(null, true, new BytesRef("foo"), true);
+    Automaton a = Automata.makeBinaryInterval(null, true, newBytesRef("foo"), true);
     assertFalse(Operations.run(a, intsRef("foz")));
     assertFalse(Operations.run(a, intsRef("zzz")));
     assertTrue(Operations.run(a, intsRef("foo")));
@@ -1602,7 +1603,7 @@ public class TestAutomaton extends LuceneTestCase {
   }
 
   public void testAcceptAllEmptyStringMin() throws Exception {
-    Automaton a = Automata.makeBinaryInterval(new BytesRef(), true, null, true);
+    Automaton a = Automata.makeBinaryInterval(newBytesRef(), true, null, true);
     assertTrue(Operations.sameLanguage(Automata.makeAnyBinary(), a));
   }
 

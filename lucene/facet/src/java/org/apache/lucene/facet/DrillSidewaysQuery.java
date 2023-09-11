@@ -19,11 +19,11 @@ package org.apache.lucene.facet;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import org.apache.lucene.facet.DrillSidewaysScorer.DocsAndCost;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.BulkScorer;
 import org.apache.lucene.search.ConstantScoreScorer;
@@ -65,19 +65,22 @@ class DrillSidewaysQuery extends Query {
       FacetsCollectorManager[] drillSidewaysCollectorManagers,
       Query[] drillDownQueries,
       boolean scoreSubDocsAtOnce) {
+    // Note that the "managed" facet collector lists are synchronized here since bulkScorer()
+    // can be invoked concurrently and needs to remain thread-safe. We're OK with synchronizing
+    // on the whole list as contention is expected to remain very low:
     this(
         baseQuery,
         drillDownCollectorManager,
         drillSidewaysCollectorManagers,
-        new ArrayList<>(),
-        new ArrayList<>(),
+        Collections.synchronizedList(new ArrayList<>()),
+        Collections.synchronizedList(new ArrayList<>()),
         drillDownQueries,
         scoreSubDocsAtOnce);
   }
 
   /**
-   * Needed for {@link #rewrite(IndexReader)}. Ensures the same "managed" lists get used since
-   * {@link DrillSideways} accesses references to these through the original {@code
+   * Needed for {@link Query#rewrite(IndexSearcher)}. Ensures the same "managed" lists get used
+   * since {@link DrillSideways} accesses references to these through the original {@code
    * DrillSidewaysQuery}.
    */
   private DrillSidewaysQuery(
@@ -103,17 +106,17 @@ class DrillSidewaysQuery extends Query {
   }
 
   @Override
-  public Query rewrite(IndexReader reader) throws IOException {
+  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
     Query newQuery = baseQuery;
     while (true) {
-      Query rewrittenQuery = newQuery.rewrite(reader);
+      Query rewrittenQuery = newQuery.rewrite(indexSearcher);
       if (rewrittenQuery == newQuery) {
         break;
       }
       newQuery = rewrittenQuery;
     }
     if (newQuery == baseQuery) {
-      return super.rewrite(reader);
+      return super.rewrite(indexSearcher);
     } else {
       return new DrillSidewaysQuery(
           newQuery,
@@ -156,15 +159,14 @@ class DrillSidewaysQuery extends Query {
 
       @Override
       public boolean isCacheable(LeafReaderContext ctx) {
-        if (baseWeight.isCacheable(ctx) == false) {
-          return false;
-        }
-        for (Weight w : drillDowns) {
-          if (w.isCacheable(ctx) == false) {
-            return false;
-          }
-        }
-        return true;
+        // We can never cache DSQ instances. It's critical that the BulkScorer produced by this
+        // Weight runs through the "normal" execution path so that it has access to an
+        // "acceptDocs" instance that accurately reflects deleted docs. During caching,
+        // "acceptDocs" is null so that caching over-matches (since the final BulkScorer would
+        // account for deleted docs). The problem is that this BulkScorer has a side-effect of
+        // populating the "sideways" FacetsCollectors, so it will use deleted docs in its
+        // sideways counting if caching kicks in. See LUCENE-10060:
+        return false;
       }
 
       @Override

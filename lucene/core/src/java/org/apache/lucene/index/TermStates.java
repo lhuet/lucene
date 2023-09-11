@@ -49,13 +49,7 @@ public final class TermStates {
     topReaderContextIdentity = context.identity;
     docFreq = 0;
     totalTermFreq = 0;
-    final int len;
-    if (context.leaves() == null) {
-      len = 1;
-    } else {
-      len = context.leaves().size();
-    }
-    states = new TermState[len];
+    states = new TermState[context.leaves().size()];
     this.term = term;
   }
 
@@ -112,12 +106,10 @@ public final class TermStates {
   }
 
   private static TermsEnum loadTermsEnum(LeafReaderContext ctx, Term term) throws IOException {
-    final Terms terms = ctx.reader().terms(term.field());
-    if (terms != null) {
-      final TermsEnum termsEnum = terms.iterator();
-      if (termsEnum.seekExact(term.bytes())) {
-        return termsEnum;
-      }
+    final Terms terms = Terms.getTerms(ctx.reader(), term.field());
+    final TermsEnum termsEnum = terms.iterator();
+    if (termsEnum.seekExact(term.bytes())) {
+      return termsEnum;
     }
     return null;
   }

@@ -20,7 +20,8 @@ import static org.apache.lucene.util.automaton.Operations.DEFAULT_DETERMINIZE_WO
 
 import java.util.ArrayList;
 import java.util.List;
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.tests.util.LuceneTestCase;
+import org.apache.lucene.tests.util.automaton.AutomatonTestUtil;
 
 public class TestLevenshteinAutomata extends LuceneTestCase {
 
@@ -64,8 +65,8 @@ public class TestLevenshteinAutomata extends LuceneTestCase {
   private void assertLev(String s, int maxDistance) {
     LevenshteinAutomata builder = new LevenshteinAutomata(s, false);
     LevenshteinAutomata tbuilder = new LevenshteinAutomata(s, true);
-    Automaton automata[] = new Automaton[maxDistance + 1];
-    Automaton tautomata[] = new Automaton[maxDistance + 1];
+    Automaton[] automata = new Automaton[maxDistance + 1];
+    Automaton[] tautomata = new Automaton[maxDistance + 1];
     for (int n = 0; n < automata.length; n++) {
       automata[n] = builder.toAutomaton(n);
       tautomata[n] = tbuilder.toAutomaton(n);
@@ -73,8 +74,8 @@ public class TestLevenshteinAutomata extends LuceneTestCase {
       assertNotNull(tautomata[n]);
       assertTrue(automata[n].isDeterministic());
       assertTrue(tautomata[n].isDeterministic());
-      assertTrue(Operations.isFinite(automata[n]));
-      assertTrue(Operations.isFinite(tautomata[n]));
+      assertTrue(AutomatonTestUtil.isFinite(automata[n]));
+      assertTrue(AutomatonTestUtil.isFinite(tautomata[n]));
       assertFalse(Operations.hasDeadStatesFromInitial(automata[n]));
       assertFalse(Operations.hasDeadStatesFromInitial(tautomata[n]));
       // check that the dfa for n-1 accepts a subset of the dfa for n
@@ -263,9 +264,9 @@ public class TestLevenshteinAutomata extends LuceneTestCase {
   private int getDistance(String target, String other) {
     char[] sa;
     int n;
-    int p[]; // 'previous' cost array, horizontally
-    int d[]; // cost array, horizontally
-    int _d[]; // placeholder to assist in swapping p and d
+    int[] p; // 'previous' cost array, horizontally
+    int[] d; // cost array, horizontally
+    int[] _d; // placeholder to assist in swapping p and d
 
     /*
       The difference between this impl. and the previous is that, rather
@@ -334,7 +335,7 @@ public class TestLevenshteinAutomata extends LuceneTestCase {
   private int getTDistance(String target, String other) {
     char[] sa;
     int n;
-    int d[][]; // cost array
+    int[][] d; // cost array
 
     sa = target.toCharArray();
     n = sa.length;

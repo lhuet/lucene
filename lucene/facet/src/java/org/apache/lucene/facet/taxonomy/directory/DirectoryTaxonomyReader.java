@@ -18,13 +18,12 @@ package org.apache.lucene.facet.taxonomy.directory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import org.apache.lucene.document.Document;
+import java.util.function.IntUnaryOperator;
 import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.facet.taxonomy.FacetLabel;
 import org.apache.lucene.facet.taxonomy.LRUHashMap;
@@ -35,6 +34,7 @@ import org.apache.lucene.index.CorruptIndexException; // javadocs
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.ReaderUtil;
@@ -44,6 +44,7 @@ import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.Accountables;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.InPlaceMergeSorter;
 import org.apache.lucene.util.RamUsageEstimator;
 
 /**
@@ -58,15 +59,13 @@ import org.apache.lucene.util.RamUsageEstimator;
  */
 public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountable {
 
-  private static final Logger log = Logger.getLogger(DirectoryTaxonomyReader.class.getName());
-
   private static final int DEFAULT_CACHE_VALUE = 4000;
 
   // NOTE: very coarse estimate!
-  private static final int BYTES_PER_CACHE_ENTRY =
-      4 * RamUsageEstimator.NUM_BYTES_OBJECT_REF
-          + 4 * RamUsageEstimator.NUM_BYTES_OBJECT_HEADER
-          + 8 * Character.BYTES;
+  private static final long BYTES_PER_CACHE_ENTRY =
+      4L * RamUsageEstimator.NUM_BYTES_OBJECT_REF
+          + 4L * RamUsageEstimator.NUM_BYTES_OBJECT_HEADER
+          + 8L * Character.BYTES;
 
   private final DirectoryTaxonomyWriter taxoWriter;
   private final long taxoEpoch; // used in doOpenIfChanged
@@ -79,8 +78,18 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
   private volatile TaxonomyIndexArrays taxoArrays;
 
   /**
-   * Called only from {@link #doOpenIfChanged()}. If the taxonomy has been recreated, you should
-   * pass {@code null} as the caches and parent/children arrays.
+   * Expert: Use this method to explicitly force the {@link DirectoryTaxonomyReader} to use specific
+   * parent/children arrays and caches.
+   *
+   * <p>Called from {@link #doOpenIfChanged()}. If the taxonomy has been recreated, you should pass
+   * {@code null} as the caches and parent/children arrays.
+   *
+   * @param indexReader An indexReader that is opened in the desired Directory
+   * @param taxoWriter The {@link DirectoryTaxonomyWriter} from which to obtain newly added
+   *     categories, in real-time.
+   * @param ordinalCache a FacetLabel to Integer ordinal mapping if it already exists
+   * @param categoryCache an ordinal to FacetLabel mapping if it already exists
+   * @param taxoArrays taxonomy arrays that store the parent, siblings, children information
    */
   DirectoryTaxonomyReader(
       DirectoryReader indexReader,
@@ -94,14 +103,9 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
     this.taxoEpoch = taxoWriter == null ? -1 : taxoWriter.getTaxonomyEpoch();
 
     // use the same instance of the cache, note the protective code in getOrdinal and getPath
-    this.ordinalCache =
-        ordinalCache == null
-            ? new LRUHashMap<FacetLabel, Integer>(DEFAULT_CACHE_VALUE)
-            : ordinalCache;
+    this.ordinalCache = ordinalCache == null ? new LRUHashMap<>(DEFAULT_CACHE_VALUE) : ordinalCache;
     this.categoryCache =
-        categoryCache == null
-            ? new LRUHashMap<Integer, FacetLabel>(DEFAULT_CACHE_VALUE)
-            : categoryCache;
+        categoryCache == null ? new LRUHashMap<>(DEFAULT_CACHE_VALUE) : categoryCache;
 
     this.taxoArrays = taxoArrays != null ? new TaxonomyIndexArrays(indexReader, taxoArrays) : null;
   }
@@ -140,16 +144,6 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
     // construction with the cache's setMaxSize() method
     ordinalCache = new LRUHashMap<>(DEFAULT_CACHE_VALUE);
     categoryCache = new LRUHashMap<>(DEFAULT_CACHE_VALUE);
-  }
-
-  private synchronized void initTaxoArrays() throws IOException {
-    if (taxoArrays == null) {
-      // according to Java Concurrency in Practice, this might perform better on
-      // some JVMs, because the array initialization doesn't happen on the
-      // volatile member.
-      TaxonomyIndexArrays tmpArrays = new TaxonomyIndexArrays(indexReader);
-      taxoArrays = tmpArrays;
-    }
   }
 
   @Override
@@ -206,18 +200,18 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
         }
       }
 
-      final DirectoryTaxonomyReader newtr;
+      final DirectoryTaxonomyReader newTaxoReader;
       if (recreated) {
-        // if recreated, do not reuse anything from this instace. the information
+        // if recreated, do not reuse anything from this instance. the information
         // will be lazily computed by the new instance when needed.
-        newtr = new DirectoryTaxonomyReader(r2, taxoWriter, null, null, null);
+        newTaxoReader = new DirectoryTaxonomyReader(r2, taxoWriter, null, null, null);
       } else {
-        newtr =
+        newTaxoReader =
             new DirectoryTaxonomyReader(r2, taxoWriter, ordinalCache, categoryCache, taxoArrays);
       }
 
       success = true;
-      return newtr;
+      return newTaxoReader;
     } finally {
       if (!success) {
         IOUtils.closeWhileHandlingException(r2);
@@ -239,7 +233,7 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
    * Expert: returns the underlying {@link DirectoryReader} instance that is used by this {@link
    * TaxonomyReader}.
    */
-  DirectoryReader getInternalIndexReader() {
+  protected DirectoryReader getInternalIndexReader() {
     ensureOpen();
     return indexReader;
   }
@@ -247,10 +241,18 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
   @Override
   public ParallelTaxonomyArrays getParallelTaxonomyArrays() throws IOException {
     ensureOpen();
-    if (taxoArrays == null) {
-      initTaxoArrays();
+    // By copying to a local variable we only perform a volatile read once (if it's not null)
+    TaxonomyIndexArrays arrays = taxoArrays;
+    if (arrays == null) {
+      synchronized (this) {
+        arrays = taxoArrays;
+        if (arrays == null) {
+          arrays = new TaxonomyIndexArrays(indexReader);
+          taxoArrays = arrays;
+        }
+      }
     }
-    return taxoArrays;
+    return arrays;
   }
 
   @Override
@@ -270,14 +272,14 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
     synchronized (ordinalCache) {
       Integer res = ordinalCache.get(cp);
       if (res != null) {
-        if (res.intValue() < indexReader.maxDoc()) {
+        if (res < indexReader.maxDoc()) {
           // Since the cache is shared with DTR instances allocated from
           // doOpenIfChanged, we need to ensure that the ordinal is one that
           // this DTR instance recognizes.
-          return res.intValue();
+          return res;
         } else {
           // if we get here, it means that the category was found in the cache,
-          // but is not recognized by this TR instance. Therefore there's no
+          // but is not recognized by this TR instance. Therefore, there's no
           // need to continue search for the path on disk, because we won't find
           // it there too.
           return TaxonomyReader.INVALID_ORDINAL;
@@ -297,13 +299,13 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
     if (docs != null && docs.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
       ret = docs.docID();
 
-      // we only store the fact that a category exists, not its inexistence.
+      // We only store the fact that a category exists, not otherwise.
       // This is required because the caches are shared with new DTR instances
       // that are allocated from doOpenIfChanged. Therefore, if we only store
-      // information about found categories, we cannot accidently tell a new
+      // information about found categories, we cannot accidentally tell a new
       // generation of DTR that a category does not exist.
       synchronized (ordinalCache) {
-        ordinalCache.put(cp, Integer.valueOf(ret));
+        ordinalCache.put(cp, ret);
       }
     }
 
@@ -316,45 +318,164 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
 
     // Since the cache is shared with DTR instances allocated from
     // doOpenIfChanged, we need to ensure that the ordinal is one that this DTR
-    // instance recognizes. Therefore we do this check up front, before we hit
+    // instance recognizes. Therefore, we do this check up front, before we hit
     // the cache.
-    if (ordinal < 0 || ordinal >= indexReader.maxDoc()) {
-      return null;
-    }
+    checkOrdinalBounds(ordinal);
 
-    // TODO: can we use an int-based hash impl, such as IntToObjectMap,
-    // wrapped as LRU?
-    Integer catIDInteger = Integer.valueOf(ordinal);
-    synchronized (categoryCache) {
-      FacetLabel res = categoryCache.get(catIDInteger);
-      if (res != null) {
-        return res;
-      }
+    FacetLabel[] ordinalPath = getPathFromCache(ordinal);
+
+    if (ordinalPath[0] != null) {
+      return ordinalPath[0];
     }
 
     int readerIndex = ReaderUtil.subIndex(ordinal, indexReader.leaves());
     LeafReader leafReader = indexReader.leaves().get(readerIndex).reader();
-    // TODO: Use LUCENE-9476 to get the bulk lookup API for extracting BinaryDocValues
     BinaryDocValues values = leafReader.getBinaryDocValues(Consts.FULL);
 
     FacetLabel ret;
 
     if (values == null
         || values.advanceExact(ordinal - indexReader.leaves().get(readerIndex).docBase) == false) {
-      // The index uses the older StoredField format to store the mapping
-      // On recreating the index, the values will be stored using the BinaryDocValuesField format
-      Document doc = indexReader.document(ordinal);
-      ret = new FacetLabel(FacetsConfig.stringToPath(doc.get(Consts.FULL)));
+      throw new IllegalStateException();
     } else {
       // The index uses the BinaryDocValuesField format to store the mapping
       ret = new FacetLabel(FacetsConfig.stringToPath(values.binaryValue().utf8ToString()));
     }
 
     synchronized (categoryCache) {
-      categoryCache.put(catIDInteger, ret);
+      categoryCache.put(ordinal, ret);
     }
 
     return ret;
+  }
+
+  private FacetLabel[] getPathFromCache(int... ordinals) {
+    FacetLabel[] facetLabels = new FacetLabel[ordinals.length];
+    // TODO LUCENE-10068: can we use an int-based hash impl, such as IntToObjectMap,
+    // wrapped as LRU?
+    synchronized (categoryCache) {
+      for (int i = 0; i < ordinals.length; i++) {
+        facetLabels[i] = categoryCache.get(ordinals[i]);
+      }
+    }
+    return facetLabels;
+  }
+
+  /**
+   * Checks if the ordinals in the array are >=0 and < {@code
+   * DirectoryTaxonomyReader#indexReader.maxDoc()}
+   *
+   * @param ordinals Integer array of ordinals
+   * @throws IllegalArgumentException Throw an IllegalArgumentException if one of the ordinals is
+   *     out of bounds
+   */
+  private void checkOrdinalBounds(int... ordinals) throws IllegalArgumentException {
+    for (int ordinal : ordinals) {
+      if (ordinal < 0 || ordinal >= indexReader.maxDoc()) {
+        throw new IllegalArgumentException(
+            "ordinal "
+                + ordinal
+                + " is out of the range of the indexReader "
+                + indexReader.toString()
+                + ". The maximum possible ordinal number is "
+                + (indexReader.maxDoc() - 1));
+      }
+    }
+  }
+
+  /**
+   * Returns an array of FacetLabels for a given array of ordinals.
+   *
+   * <p>This API is generally faster than iteratively calling {@link #getPath(int)} over an array of
+   * ordinals. It uses the {@link #getPath(int)} method iteratively when it detects that the index
+   * was created using StoredFields (with no performance gains) and uses DocValues based iteration
+   * when the index is based on BinaryDocValues. Lucene switched to BinaryDocValues in version 9.0
+   *
+   * @param ordinals Array of category ordinals that were added to the taxonomy index
+   */
+  @Override
+  public FacetLabel[] getBulkPath(int... ordinals) throws IOException {
+    ensureOpen();
+    checkOrdinalBounds(ordinals);
+
+    int ordinalsLength = ordinals.length;
+    FacetLabel[] bulkPath = new FacetLabel[ordinalsLength];
+    // remember the original positions of ordinals before they are sorted
+    int[] originalPosition = new int[ordinalsLength];
+    Arrays.setAll(originalPosition, IntUnaryOperator.identity());
+
+    getPathFromCache(ordinals);
+
+    /* parallel sort the ordinals and originalPosition array based on the values in the ordinals array */
+    new InPlaceMergeSorter() {
+      @Override
+      protected void swap(int i, int j) {
+        int x = ordinals[i];
+        ordinals[i] = ordinals[j];
+        ordinals[j] = x;
+
+        x = originalPosition[i];
+        originalPosition[i] = originalPosition[j];
+        originalPosition[j] = x;
+      }
+
+      @Override
+      public int compare(int i, int j) {
+        return Integer.compare(ordinals[i], ordinals[j]);
+      }
+    }.sort(0, ordinalsLength);
+
+    int readerIndex;
+    int leafReaderMaxDoc = 0;
+    int leafReaderDocBase = 0;
+    LeafReader leafReader;
+    LeafReaderContext leafReaderContext;
+    BinaryDocValues values = null;
+    List<Integer> uncachedOrdinalPositions = new ArrayList<>();
+
+    for (int i = 0; i < ordinalsLength; i++) {
+      if (bulkPath[originalPosition[i]] == null) {
+        /*
+        If ordinals[i] >= leafReaderDocBase + leafReaderMaxDoc then we find the next leaf that contains our ordinal.
+        Remember: ordinals[i] operates in the global ordinal space and hence we add leafReaderDocBase to the leafReaderMaxDoc
+        (which is the maxDoc of the specific leaf)
+         */
+        if (values == null || ordinals[i] >= leafReaderDocBase + leafReaderMaxDoc) {
+
+          readerIndex = ReaderUtil.subIndex(ordinals[i], indexReader.leaves());
+          leafReaderContext = indexReader.leaves().get(readerIndex);
+          leafReader = leafReaderContext.reader();
+          leafReaderMaxDoc = leafReader.maxDoc();
+          leafReaderDocBase = leafReaderContext.docBase;
+          values = leafReader.getBinaryDocValues(Consts.FULL);
+
+          /*
+          If the index is constructed with the older StoredFields it will not have any BinaryDocValues field and will return null
+           */
+          if (values == null) {
+            return super.getBulkPath(ordinals);
+          }
+        }
+        // values is leaf specific, so you only advance till you reach the target within the leaf
+        boolean success = values.advanceExact(ordinals[i] - leafReaderDocBase);
+        assert success;
+        bulkPath[originalPosition[i]] =
+            new FacetLabel(FacetsConfig.stringToPath(values.binaryValue().utf8ToString()));
+
+        uncachedOrdinalPositions.add(i);
+      }
+    }
+
+    if (uncachedOrdinalPositions.isEmpty() == false) {
+      synchronized (categoryCache) {
+        for (int i : uncachedOrdinalPositions) {
+          // add the value to the categoryCache after computation
+          categoryCache.put(ordinals[i], bulkPath[originalPosition[i]]);
+        }
+      }
+    }
+
+    return bulkPath;
   }
 
   @Override
@@ -429,8 +550,8 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
   public String toString(int max) {
     ensureOpen();
     StringBuilder sb = new StringBuilder();
-    int upperl = Math.min(max, indexReader.maxDoc());
-    for (int i = 0; i < upperl; i++) {
+    int limit = Math.min(max, indexReader.maxDoc());
+    for (int i = 0; i < limit; i++) {
       try {
         FacetLabel category = this.getPath(i);
         if (category == null) {
@@ -441,11 +562,11 @@ public class DirectoryTaxonomyReader extends TaxonomyReader implements Accountab
           sb.append(i).append(": EMPTY STRING!! \n");
           continue;
         }
-        sb.append(i).append(": ").append(category.toString()).append("\n");
-      } catch (IOException e) {
-        if (log.isLoggable(Level.FINEST)) {
-          log.log(Level.FINEST, e.getMessage(), e);
-        }
+        sb.append(i).append(": ").append(category).append("\n");
+      } catch (
+          @SuppressWarnings("unused")
+          IOException e) {
+        sb.append(i).append(": EXCEPTION!! \n");
       }
     }
     return sb.toString();

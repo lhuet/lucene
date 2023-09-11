@@ -22,9 +22,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.queries.spans.SpanBoostQuery;
 import org.apache.lucene.queries.spans.SpanNearQuery;
 import org.apache.lucene.queries.spans.SpanNotQuery;
 import org.apache.lucene.queries.spans.SpanOrQuery;
@@ -257,7 +255,7 @@ public class ComplexPhraseQueryParser extends QueryParser {
     }
 
     @Override
-    public Query rewrite(IndexReader reader) throws IOException {
+    public Query rewrite(IndexSearcher indexSearcher) throws IOException {
       final Query contents = this.contents[0];
       // ArrayList spanClauses = new ArrayList();
       if (contents instanceof TermQuery
@@ -285,7 +283,7 @@ public class ComplexPhraseQueryParser extends QueryParser {
         // HashSet bclauseterms=new HashSet();
         Query qc = clause.getQuery();
         // Rewrite this clause e.g one* becomes (one OR onerous)
-        qc = new IndexSearcher(reader).rewrite(qc);
+        qc = indexSearcher.rewrite(qc);
         if (clause.getOccur().equals(BooleanClause.Occur.MUST_NOT)) {
           numNegatives++;
         }
@@ -380,10 +378,8 @@ public class ComplexPhraseQueryParser extends QueryParser {
       for (BooleanClause clause : qc) {
         Query childQuery = clause.getQuery();
 
-        float boost = 1f;
         while (childQuery instanceof BoostQuery) {
           BoostQuery bq = (BoostQuery) childQuery;
-          boost *= bq.getBoost();
           childQuery = bq.getQuery();
         }
 
@@ -396,9 +392,6 @@ public class ComplexPhraseQueryParser extends QueryParser {
         if (childQuery instanceof TermQuery) {
           TermQuery tq = (TermQuery) childQuery;
           SpanQuery stq = new SpanTermQuery(tq.getTerm());
-          if (boost != 1f) {
-            stq = new SpanBoostQuery(stq, boost);
-          }
           chosenList.add(stq);
         } else if (childQuery instanceof BooleanQuery) {
           BooleanQuery cbq = (BooleanQuery) childQuery;

@@ -37,18 +37,18 @@ public class LevenshteinAutomata {
    */
   public static final int MAXIMUM_SUPPORTED_DISTANCE = 2;
   /* input word */
-  final int word[];
+  final int[] word;
   /* the automata alphabet. */
-  final int alphabet[];
+  final int[] alphabet;
   /* the maximum symbol in the alphabet (e.g. 255 for UTF-8 or 10FFFF for UTF-32) */
   final int alphaMax;
 
   /* the ranges outside of alphabet */
-  final int rangeLower[];
-  final int rangeUpper[];
+  final int[] rangeLower;
+  final int[] rangeUpper;
   int numRanges = 0;
 
-  ParametricDescription descriptions[];
+  ParametricDescription[] descriptions;
 
   /**
    * Create a new LevenshteinAutomata for some input String. Optionally count transpositions as a
@@ -114,7 +114,7 @@ public class LevenshteinAutomata {
 
   private static int[] codePoints(String input) {
     int length = Character.codePointCount(input, 0, input.length());
-    int word[] = new int[length];
+    int[] word = new int[length];
     for (int i = 0, j = 0, cp = 0; i < input.length(); i += Character.charCount(cp)) {
       word[j++] = cp = input.codePointAt(i);
     }
@@ -217,8 +217,9 @@ public class LevenshteinAutomata {
     }
 
     a.finishState();
-    assert a.isDeterministic();
-    return a;
+    Automaton automaton = Operations.removeDeadStates(a);
+    assert automaton.isDeterministic();
+    return automaton;
   }
 
   /**
@@ -357,7 +358,7 @@ public class LevenshteinAutomata {
         };
 
     protected int unpack(long[] data, int index, int bitsPerValue) {
-      final long bitLoc = bitsPerValue * index;
+      final long bitLoc = bitsPerValue * (long) index;
       final int dataLoc = (int) (bitLoc >> 6);
       final int bitStart = (int) (bitLoc & 63);
       // System.out.println("index=" + index + " dataLoc=" + dataLoc + " bitStart=" + bitStart + "

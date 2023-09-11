@@ -43,6 +43,7 @@ import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.CollectionUtil;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.Version;
@@ -112,14 +113,7 @@ import org.apache.lucene.util.Version;
  */
 public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo> {
 
-  /**
-   * The version that added information about the Lucene version at the time when the index has been
-   * created.
-   */
-  public static final int VERSION_70 = 7;
-  /** The version that updated segment name counter to be long instead of int. */
-  public static final int VERSION_72 = 8;
-  /** The version that recorded softDelCount */
+  /** The version at the time when 8.0 was released. */
   public static final int VERSION_74 = 9;
   /** The version that recorded SegmentCommitInfo IDs */
   public static final int VERSION_86 = 10;
@@ -294,7 +288,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
     long generation = generationFromSegmentsFileName(segmentFileName);
     // System.out.println(Thread.currentThread() + ": SegmentInfos.readCommit " + segmentFileName);
-    try (ChecksumIndexInput input = directory.openChecksumInput(segmentFileName, IOContext.READ)) {
+    try (ChecksumIndexInput input = directory.openChecksumInput(segmentFileName)) {
       try {
         return readCommit(directory, input, generation, minSupportedMajorVersion);
       } catch (EOFException | NoSuchFileException | FileNotFoundException e) {
@@ -324,8 +318,8 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
         throw new IndexFormatTooOldException(
             input, magic, CodecUtil.CODEC_MAGIC, CodecUtil.CODEC_MAGIC);
       }
-      format = CodecUtil.checkHeaderNoMagic(input, "segments", VERSION_70, VERSION_CURRENT);
-      byte id[] = new byte[StringHelper.ID_LENGTH];
+      format = CodecUtil.checkHeaderNoMagic(input, "segments", VERSION_74, VERSION_CURRENT);
+      byte[] id = new byte[StringHelper.ID_LENGTH];
       input.readBytes(id, 0, id.length);
       CodecUtil.checkIndexHeaderSuffix(input, Long.toString(generation, Character.MAX_RADIX));
 
@@ -366,7 +360,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     } catch (Throwable t) {
       priorE = t;
     } finally {
-      if (format >= VERSION_70) { // oldest supported version
+      if (format >= VERSION_74) { // oldest supported version
         CodecUtil.checkFooter(input, priorE);
       } else {
         throw IOUtils.rethrowAlways(priorE);
@@ -379,11 +373,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
       Directory directory, DataInput input, SegmentInfos infos, int format) throws IOException {
     infos.version = CodecUtil.readBELong(input);
     // System.out.println("READ sis version=" + infos.version);
-    if (format > VERSION_70) {
-      infos.counter = input.readVLong();
-    } else {
-      infos.counter = CodecUtil.readBEInt(input);
-    }
+    infos.counter = input.readVLong();
     int numSegments = CodecUtil.readBEInt(input);
     if (numSegments < 0) {
       throw new CorruptIndexException("invalid segment count: " + numSegments, input);
@@ -414,7 +404,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
       }
       long fieldInfosGen = CodecUtil.readBELong(input);
       long dvGen = CodecUtil.readBELong(input);
-      int softDelCount = format > VERSION_72 ? CodecUtil.readBEInt(input) : 0;
+      int softDelCount = CodecUtil.readBEInt(input);
       if (softDelCount < 0 || softDelCount > info.maxDoc()) {
         throw new CorruptIndexException(
             "invalid deletion count: " + softDelCount + " vs maxDoc=" + info.maxDoc(), input);
@@ -450,7 +440,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
       if (numDVFields == 0) {
         dvUpdateFiles = Collections.emptyMap();
       } else {
-        Map<Integer, Set<String>> map = new HashMap<>(numDVFields);
+        Map<Integer, Set<String>> map = CollectionUtil.newHashMap(numDVFields);
         for (int i = 0; i < numDVFields; i++) {
           map.put(CodecUtil.readBEInt(input), input.readSetOfStrings());
         }
@@ -527,8 +517,14 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     return readLatestCommit(directory, Version.MIN_SUPPORTED_MAJOR);
   }
 
-  static final SegmentInfos readLatestCommit(Directory directory, int minSupportedMajorVersion)
-      throws IOException {
+  /**
+   * Find the latest commit ({@code segments_N file}) and load all {@link SegmentCommitInfo}s, as
+   * long as the commit's {@link SegmentInfos#getIndexCreatedVersionMajor()} is strictly greater
+   * than the provided minimum supported major version. If the commit's version is older, an {@link
+   * IndexFormatTooOldException} will be thrown.
+   */
+  public static final SegmentInfos readLatestCommit(
+      Directory directory, int minSupportedMajorVersion) throws IOException {
     return new FindSegmentsFile<SegmentInfos>(directory) {
       @Override
       protected SegmentInfos doBody(String segmentFileName) throws IOException {
@@ -620,7 +616,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
                 + si);
       }
       out.writeString(si.name);
-      byte segmentID[] = si.getId();
+      byte[] segmentID = si.getId();
       if (segmentID.length != StringHelper.ID_LENGTH) {
         throw new IllegalStateException(
             "cannot write segment: invalid id segment="
@@ -784,8 +780,8 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
       for (; ; ) {
         lastGen = gen;
-        String files[] = directory.listAll();
-        String files2[] = directory.listAll();
+        String[] files = directory.listAll();
+        String[] files2 = directory.listAll();
         Arrays.sort(files);
         Arrays.sort(files2);
         if (!Arrays.equals(files, files2)) {

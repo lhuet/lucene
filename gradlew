@@ -44,7 +44,12 @@ APP_NAME="Gradle"
 APP_BASE_NAME=`basename "$0"`
 
 # Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
-DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
+DEFAULT_JVM_OPTS='-Xmx64m -Xms64m -Djava.net.useSystemProxies=true'
+
+# Define this environment variable to override the default JVM options.
+if [ ! -n "$JAVA_OPTS" ] ; then
+    JAVA_OPTS="$DEFAULT_JVM_OPTS"
+fi
 
 # Use the maximum available, or set MAX_FD != -1 to use that value.
 MAX_FD="maximum"
@@ -114,19 +119,29 @@ DEFAULT_JVM_OPTS="$DEFAULT_JVM_OPTS \"-Djava.io.tmpdir=$GRADLE_TEMPDIR\""
 if [ "$cygwin" = "true" -o "$msys" = "true" ] ; then
     APP_HOME=`cygpath --path --mixed "$APP_HOME"`
 fi
+
 GRADLE_WRAPPER_JAR="$APP_HOME/gradle/wrapper/gradle-wrapper.jar"
-if ! "$JAVACMD" --source 11 "$APP_HOME/buildSrc/src/main/java/org/apache/lucene/gradle/WrapperDownloader.java" "$GRADLE_WRAPPER_JAR" ; then
-    echo "\nSomething went wrong. Make sure you're using Java 11 or later."
-    exit $?
+"$JAVACMD" $JAVA_OPTS --source 11 "$APP_HOME/buildSrc/src/main/java/org/apache/lucene/gradle/WrapperDownloader.java" "$GRADLE_WRAPPER_JAR"
+WRAPPER_STATUS=$?
+if [ "$WRAPPER_STATUS" -eq 1 ]; then
+    echo "ERROR: Something went wrong. Make sure you're using Java version between 17 and 19."
+    exit $WRAPPER_STATUS
+elif [ "$WRAPPER_STATUS" -ne 0 ]; then
+    exit $WRAPPER_STATUS
 fi
 
 CLASSPATH=$GRADLE_WRAPPER_JAR
 
-# Don't fork a daemon mode on initial run that generates local defaults.
-GRADLE_DAEMON_CTRL=
+# START OF LUCENE CUSTOMIZATION
+# Generate gradle.properties if they don't exist
 if [ ! -e "$APP_HOME/gradle.properties" ]; then
-    GRADLE_DAEMON_CTRL=--no-daemon
+    "$JAVACMD" $JAVA_OPTS --source 11 "$APP_HOME/buildSrc/src/main/java/org/apache/lucene/gradle/GradlePropertiesGenerator.java" "$APP_HOME/gradle/template.gradle.properties" "$APP_HOME/gradle.properties"
+    GENERATOR_STATUS=$?
+    if [ "$GENERATOR_STATUS" -ne 0 ]; then
+        exit $GENERATOR_STATUS
+    fi
 fi
+# END OF LUCENE CUSTOMIZATION
 
 # Increase the maximum file descriptors if we can.
 if [ "$cygwin" = "false" -a "$darwin" = "false" -a "$nonstop" = "false" ] ; then
@@ -199,8 +214,11 @@ save () {
 }
 APP_ARGS=$(save "$@")
 
+# Prevent jgit from forking/searching git.exe
+export GIT_CONFIG_NOSYSTEM=1
+
 # Collect all arguments for the java command, following the shell quoting and substitution rules
-eval set -- $DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS "\"-Dorg.gradle.appname=$APP_BASE_NAME\"" -classpath "\"$CLASSPATH\"" org.gradle.wrapper.GradleWrapperMain $GRADLE_DAEMON_CTRL "$APP_ARGS"
+eval set -- $JAVA_OPTS $GRADLE_OPTS "\"-Dorg.gradle.appname=$APP_BASE_NAME\"" -classpath "\"$CLASSPATH\"" org.gradle.wrapper.GradleWrapperMain "$APP_ARGS"
 
 # by default we should be in the correct project dir, but when run from Finder on Mac, the cwd is wrong
 if [ "$(uname)" = "Darwin" ] && [ "$HOME" = "$PWD" ]; then
