@@ -16,35 +16,21 @@
  */
 package org.apache.lucene.codecs.zstd;
 
-import org.apache.lucene.codecs.FilterCodec;
-import org.apache.lucene.codecs.StoredFieldsFormat;
-import org.apache.lucene.codecs.lucene99.Lucene99Codec;
+import org.apache.lucene.codecs.Codec;
+import org.apache.lucene.tests.index.BaseStoredFieldsFormatTestCase;
+import org.junit.Before;
 
-/** Codec that uses ZSTD for stored fields. */
-public final class Zstd90Codec extends FilterCodec {
+public class TestZstdDictStoredFieldsFormat extends BaseStoredFieldsFormatTestCase {
 
-  private final StoredFieldsFormat format;
-  private final int level;
+  private static final Codec CODEC = new ZstdDict90Codec();
 
-  /** Default constructor. */
-  public Zstd90Codec() {
-    this(10);
-  }
-
-  /** Create a new codec using the configured compression level. */
-  public Zstd90Codec(int level) {
-    super("Zstd90", new Lucene99Codec());
-    this.format = new ZstdStoredFieldsFormat(level);
-    this.level = level;
+  @Before
+  public void checkZstdAvailable() {
+    assumeTrue("Zstd is not available on this system", Zstd.available());
   }
 
   @Override
-  public StoredFieldsFormat storedFieldsFormat() {
-    return format;
-  }
-
-  @Override
-  public String toString() {
-    return getClass().getSimpleName() + "(level=" + level + ")";
+  protected Codec getCodec() {
+    return CODEC;
   }
 }

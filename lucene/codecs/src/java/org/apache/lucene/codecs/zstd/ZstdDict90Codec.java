@@ -21,20 +21,20 @@ import org.apache.lucene.codecs.StoredFieldsFormat;
 import org.apache.lucene.codecs.lucene99.Lucene99Codec;
 
 /** Codec that uses ZSTD for stored fields. */
-public final class Zstd90Codec extends FilterCodec {
+public final class ZstdDict90Codec extends FilterCodec {
 
   private final StoredFieldsFormat format;
   private final int level;
 
   /** Default constructor. */
-  public Zstd90Codec() {
+  public ZstdDict90Codec() {
     this(10);
   }
 
   /** Create a new codec using the configured compression level. */
-  public Zstd90Codec(int level) {
-    super("Zstd90", new Lucene99Codec());
-    this.format = new ZstdStoredFieldsFormat(level);
+  public ZstdDict90Codec(int level) {
+    super("ZstdDict90", new Lucene99Codec());
+    this.format = new ZstdDictStoredFieldsFormat(level);
     this.level = level;
   }
 

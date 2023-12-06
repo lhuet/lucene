@@ -15,3 +15,4 @@
 
 org.apache.lucene.codecs.simpletext.SimpleTextCodec
 org.apache.lucene.codecs.zstd.Zstd90Codec
+org.apache.lucene.codecs.zstd.ZstdDict90Codec

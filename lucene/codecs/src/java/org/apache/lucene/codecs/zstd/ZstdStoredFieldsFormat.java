@@ -22,6 +22,7 @@ import org.apache.lucene.codecs.compressing.CompressionMode;
 import org.apache.lucene.codecs.compressing.Compressor;
 import org.apache.lucene.codecs.compressing.Decompressor;
 import org.apache.lucene.codecs.lucene90.compressing.Lucene90CompressingStoredFieldsFormat;
+import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.store.ByteBuffersDataInput;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
@@ -32,17 +33,13 @@ import org.apache.lucene.util.BytesRef;
 public final class ZstdStoredFieldsFormat extends Lucene90CompressingStoredFieldsFormat {
 
   // Size of top-level blocks, which themselves contain a dictionary and 10 sub blocks
-  private static final int BLOCK_SIZE = 10 * 48 * 1024;
-  // Shoot for 10 sub blocks
-  private static final int NUM_SUB_BLOCKS = 10;
-  // And a dictionary whose size is about 3x smaller than sub blocks
-  private static final int DICT_SIZE_FACTOR = 6;
+  private static final int BLOCK_SIZE = 128 * 1024;
 
   /** Stored fields format with specified compression level. */
   public ZstdStoredFieldsFormat(int level) {
     // same block size, max number of docs per block and block shift as the default codec with
     // DEFLATE
-    super("ZstdStoredfields", new ZstdCompressionMode(level), BLOCK_SIZE, 4096, 10);
+    super("ZstdStoredfields", new ZstdCompressionMode(level), BLOCK_SIZE, 1024, 10);
   }
 
   private static class ZstdCompressionMode extends CompressionMode {
@@ -71,81 +68,22 @@ public final class ZstdStoredFieldsFormat extends Lucene90CompressingStoredField
       compressed = BytesRef.EMPTY_BYTES;
     }
 
-    private void doDecompress(
-        DataInput in,
-        Zstd.Decompressor dctx,
-        Zstd.DecompressionDictionary ddict,
-        BytesRef bytes,
-        int decompressedLen)
-        throws IOException {
-      final int compressedLength = in.readVInt();
-      if (compressedLength == 0) {
-        return;
-      }
-      compressed = ArrayUtil.grow(compressed, compressedLength);
-      in.readBytes(compressed, 0, compressedLength);
-
-      final ByteBuffer compressedBuffer = ByteBuffer.wrap(compressed, 0, compressedLength);
-      bytes.bytes = ArrayUtil.grow(bytes.bytes, bytes.length + decompressedLen);
-
-      final int decompressedLen2 =
-          dctx.decompress(
-              ByteBuffer.wrap(bytes.bytes, bytes.length, bytes.bytes.length - bytes.length),
-              compressedBuffer,
-              ddict);
-      if (decompressedLen != decompressedLen2) {
-        throw new IllegalStateException(decompressedLen + " " + decompressedLen2);
-      }
-      bytes.length += decompressedLen2;
-    }
-
     @Override
     public void decompress(DataInput in, int originalLength, int offset, int length, BytesRef bytes)
         throws IOException {
-      assert offset + length <= originalLength;
-      if (length == 0) {
-        bytes.length = 0;
-        return;
-      }
-      final int dictLength = in.readVInt();
-      final int blockLength = in.readVInt();
-      bytes.bytes = ArrayUtil.grow(bytes.bytes, dictLength);
-      bytes.offset = bytes.length = 0;
+      final int compressedLength = in.readVInt();
+      compressed = ArrayUtil.growNoCopy(compressed, compressedLength);
+      in.readBytes(compressed, 0, compressedLength);
+      bytes.bytes = ArrayUtil.growNoCopy(bytes.bytes, originalLength);
 
-      try (Zstd.Decompressor dctx = new Zstd.Decompressor()) {
-        // Read the dictionary
-        try (Zstd.DecompressionDictionary ddict =
-            Zstd.createDecompressionDictionary(ByteBuffer.allocate(0))) {
-          doDecompress(in, dctx, ddict, bytes, dictLength);
+      try (Zstd.Decompressor dctx = new Zstd.Decompressor(); Zstd.DecompressionDictionary ddict =
+          Zstd.createDecompressionDictionary(ByteBuffer.allocate(0))) {
+        final int l = dctx.decompress(ByteBuffer.wrap(bytes.bytes), ByteBuffer.wrap(compressed, 0, compressedLength), ddict);
+        if (l != originalLength) {
+          throw new CorruptIndexException("Corrupt", in);
         }
-
-        int offsetInBlock = dictLength;
-        int offsetInBytesRef = offset;
-
-        // Skip unneeded blocks
-        while (offsetInBlock + blockLength < offset) {
-          final int compressedLength = in.readVInt();
-          in.skipBytes(compressedLength);
-          offsetInBlock += blockLength;
-          offsetInBytesRef -= blockLength;
-        }
-
-        // Read blocks that intersect with the interval we need
-        if (offsetInBlock < offset + length) {
-          try (Zstd.DecompressionDictionary ddict =
-              Zstd.createDecompressionDictionary(ByteBuffer.wrap(bytes.bytes, 0, dictLength))) {
-            while (offsetInBlock < offset + length) {
-              bytes.bytes = ArrayUtil.grow(bytes.bytes, bytes.length + blockLength);
-              doDecompress(
-                  in, dctx, ddict, bytes, Math.min(blockLength, originalLength - offsetInBlock));
-              offsetInBlock += blockLength;
-            }
-          }
-        }
-
-        bytes.offset = offsetInBytesRef;
+        bytes.offset = offset;
         bytes.length = length;
-        assert bytes.isValid();
       }
     }
 
@@ -167,59 +105,25 @@ public final class ZstdStoredFieldsFormat extends Lucene90CompressingStoredField
       buffer = BytesRef.EMPTY_BYTES;
     }
 
-    private void doCompress(
-        byte[] bytes,
-        int off,
-        int len,
-        Zstd.Compressor cctx,
-        Zstd.CompressionDictionary cdict,
-        DataOutput out)
-        throws IOException {
-      if (len == 0) {
-        out.writeVInt(0);
-        return;
-      }
-
-      final int maxCompressedLength = Zstd.getMaxCompressedLen(len);
-      compressed = ArrayUtil.grow(compressed, maxCompressedLength);
-
-      int compressedLen =
-          cctx.compress(
-              ByteBuffer.wrap(compressed, 0, compressed.length),
-              ByteBuffer.wrap(bytes, off, len),
-              cdict,
-              level);
-
-      out.writeVInt(compressedLen);
-      out.writeBytes(compressed, compressedLen);
-    }
-
     @Override
     public void compress(ByteBuffersDataInput buffersInput, DataOutput out) throws IOException {
-      final int len = (int) (buffersInput.size() - buffersInput.position());
-      final int dictLength = len / (NUM_SUB_BLOCKS * DICT_SIZE_FACTOR);
-      final int blockLength = (len - dictLength + NUM_SUB_BLOCKS - 1) / NUM_SUB_BLOCKS;
-      out.writeVInt(dictLength);
-      out.writeVInt(blockLength);
+      final int len = (int) buffersInput.size();
 
-      buffer = ArrayUtil.growNoCopy(buffer, dictLength + blockLength);
+      buffer = ArrayUtil.growNoCopy(buffer, len);
+      buffersInput.readBytes(buffer, 0, len);
 
-      // Compress the dictionary first
+      final int maxCompressedLength = Zstd.getMaxCompressedLen(len);
+      compressed = ArrayUtil.growNoCopy(compressed, maxCompressedLength);
+
       try (Zstd.Compressor cctx = new Zstd.Compressor()) {
+        int compressedLen =
+            cctx.compress(
+                ByteBuffer.wrap(compressed, 0, compressed.length),
+                ByteBuffer.wrap(buffer, 0, len),
+                level);
 
-        // First compress the dictionary
-        buffersInput.readBytes(buffer, 0, dictLength);
-        doCompress(buffer, 0, dictLength, cctx, null, out);
-
-        // And then sub blocks with this dictionary
-        try (Zstd.CompressionDictionary cdict =
-            Zstd.createCompressionDictionary(ByteBuffer.wrap(buffer, 0, dictLength), level)) {
-          for (int start = dictLength; start < len; start += blockLength) {
-            int l = Math.min(blockLength, len - start);
-            buffersInput.readBytes(buffer, dictLength, l);
-            doCompress(buffer, dictLength, l, cctx, cdict, out);
-          }
-        }
+        out.writeVInt(compressedLen);
+        out.writeBytes(compressed, compressedLen);
       }
     }
 

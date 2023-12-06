@@ -93,6 +93,7 @@ final class Zstd {
 
     int ZSTD_decompress_usingDDict(
         Pointer dctx, ByteBuffer dst, int dstLen, ByteBuffer src, int srcLen, Pointer ddict);
+
   }
 
   public static class Compressor implements Closeable {
