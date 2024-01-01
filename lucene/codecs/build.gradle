@@ -21,6 +21,19 @@ description = 'Lucene codecs and postings formats'
 
 dependencies {
     moduleImplementation project(':lucene:core')
-    implementation 'net.java.dev.jna:jna:5.6.0'
+    moduleImplementation  'net.java.dev.jna:jna:5.14.0'
     moduleTestImplementation project(':lucene:test-framework')
 }
+
+tasks.withType(JavaCompile).configureEach {
+    javaCompiler = javaToolchains.compilerFor {
+        options.compilerArgs.clear()
+        options.compilerArgs += ["-source", 22]
+        options.compilerArgs += ["-target", 22]
+        //options.compilerArgs += ["--enable-preview"]
+        languageVersion = JavaLanguageVersion.of(22)
+        options.fork = true
+        options.forkOptions.executable = "${jdk22_home}/bin/javac"
+    }
+}
+

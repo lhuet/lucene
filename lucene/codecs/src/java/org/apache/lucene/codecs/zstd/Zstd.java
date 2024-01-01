@@ -18,127 +18,67 @@ package org.apache.lucene.codecs.zstd;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
 import java.nio.ByteBuffer;
 
-import com.sun.jna.Library;
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
+import org.apache.lucene.panama.zstd.Libzstd;
 
-/** JNA bindings for ZSTD. */
+
 final class Zstd {
-
-  private static final ZstdLibrary LIBRARY;
-  private static final Error ERROR;
-
-  static {
-    ZstdLibrary library = null;
-    Error error = null;
-    try {
-      library = Native.load("zstd", ZstdLibrary.class);
-    } catch (Error e) {
-      error = e;
-    }
-    LIBRARY = library;
-    ERROR = error;
-  }
-
-  public static boolean available() {
-    return LIBRARY != null;
-  }
-
-  private static ZstdLibrary library() {
-    if (ERROR != null) {
-      throw new IllegalStateException("Could not load libzstd", ERROR);
-    }
-    return LIBRARY;
-  }
-
-  private interface ZstdLibrary extends Library {
-
-    int ZSTD_compressBound(int scrLen);
-
-    int ZSTD_getFrameContentSize(ByteBuffer src, int srcLen);
-
-    Pointer ZSTD_createCCtx();
-
-    int ZSTD_freeCCtx(Pointer cctx);
-
-    Pointer ZSTD_createCDict(ByteBuffer dict, int dictLen, int level);
-
-    int ZSTD_freeCDict(Pointer cdict);
-
-    int ZSTD_compressCCtx(
-        Pointer cctx, ByteBuffer dst, int dstLen, ByteBuffer src, int srcLen, int compressionLevel);
-
-    int ZSTD_compress_usingCDict(
-        Pointer cctx,
-        ByteBuffer dst,
-        int dstLen,
-        ByteBuffer src,
-        int srcLen,
-        Pointer cdict,
-        int level);
-
-    boolean ZSTD_isError(int code);
-
-    String ZSTD_getErrorName(int code);
-
-    Pointer ZSTD_createDCtx();
-
-    int ZSTD_freeDCtx(Pointer dctx);
-
-    Pointer ZSTD_createDDict(ByteBuffer dict, int dictLen);
-
-    int ZSTD_freeDDict(Pointer ddict);
-
-    int ZSTD_decompress_usingDDict(
-        Pointer dctx, ByteBuffer dst, int dstLen, ByteBuffer src, int srcLen, Pointer ddict);
-
-  }
 
   public static class Compressor implements Closeable {
 
-    private Pointer cctx;
+    private MemorySegment cctx;
     private boolean closed;
 
     Compressor() {
-      cctx = library().ZSTD_createCCtx();
+      cctx = Libzstd.ZSTD_createCCtx();
       if (cctx == null) {
         throw new IllegalStateException("Can't allocate compression context");
       }
     }
 
     public synchronized int compress(ByteBuffer dst, ByteBuffer src, int level) {
-      int ret =
-          library().ZSTD_compressCCtx(cctx, dst, dst.remaining(), src, src.remaining(), level);
-      if (library().ZSTD_isError(ret)) {
-        throw new IllegalArgumentException(library().ZSTD_getErrorName(ret));
+      MemorySegment dstSegment = Arena.ofAuto().allocate(dst.remaining());
+      MemorySegment srcSegment = Arena.ofAuto().allocate(src.remaining());
+      MemorySegment.copy(src.array(), 0, srcSegment, ValueLayout.JAVA_BYTE, 0, src.remaining());
+      long ret =
+          Libzstd.ZSTD_compressCCtx(cctx, dstSegment, dst.remaining(), srcSegment, src.remaining(), level);
+      if (Libzstd.ZSTD_isError(ret)!=0) {
+        throw new IllegalArgumentException(Libzstd.ZSTD_getErrorName(ret).getString(0));
       }
-      return ret;
+      MemorySegment.copy(dstSegment, ValueLayout.JAVA_BYTE, 0, (Object) dst.array(), 0, (int) ret);
+      return (int) ret;
     }
 
     public synchronized int compress(
         ByteBuffer dst, ByteBuffer src, CompressionDictionary cdict, int level) {
-      int ret;
+      MemorySegment dstSegment = Arena.ofAuto().allocate(dst.remaining());
+      MemorySegment srcSegment = Arena.ofAuto().allocate(src.remaining());
+      MemorySegment.copy(src.array(), 0, srcSegment, ValueLayout.JAVA_BYTE, 0, src.remaining());
+      long ret;
       if (cdict == null) {
-        ret = library().ZSTD_compressCCtx(cctx, dst, dst.remaining(), src, src.remaining(), level);
+        ret = Libzstd.ZSTD_compressCCtx(cctx, dstSegment, dst.remaining(), srcSegment, src.remaining(), level);
       } else {
         ret =
-            library()
+            Libzstd
                 .ZSTD_compress_usingCDict(
-                    cctx, dst, dst.remaining(), src, src.remaining(), cdict.cdict, level);
+                    cctx, dstSegment, dst.remaining(), srcSegment, src.remaining(), cdict.cdict);
       }
-      if (library().ZSTD_isError(ret)) {
-        throw new IllegalArgumentException(library().ZSTD_getErrorName(ret));
+      if (Libzstd.ZSTD_isError(ret)!=0) {
+        throw new IllegalArgumentException(Libzstd.ZSTD_getErrorName(ret).getString(0));
       }
-      return ret;
+      MemorySegment.copy(dstSegment, ValueLayout.JAVA_BYTE, 0, (Object) dst.array(), 0, (int) ret);
+      return (int) ret;
     }
 
     @Override
     public synchronized void close() throws IOException {
       if (closed == false) {
         closed = true;
-        library().ZSTD_freeCCtx(cctx);
+        Libzstd.ZSTD_freeCCtx(cctx);
         cctx = null;
       }
     }
@@ -146,11 +86,11 @@ final class Zstd {
 
   public static class Decompressor implements Closeable {
 
-    private Pointer dctx;
+    private MemorySegment dctx;
     private boolean closed;
 
     Decompressor() {
-      dctx = library().ZSTD_createDCtx();
+      dctx = Libzstd.ZSTD_createDCtx();
       if (dctx == null) {
         throw new IllegalStateException("Can't allocate decompression context");
       }
@@ -161,21 +101,25 @@ final class Zstd {
       if (closed) {
         throw new IllegalStateException();
       }
-      int ret =
-          library()
+      MemorySegment srcSegment = Arena.ofAuto().allocate(src.remaining());
+      MemorySegment dstSegment = Arena.ofAuto().allocate(dst.remaining());
+      MemorySegment.copy(src.array(), 0, srcSegment, ValueLayout.JAVA_BYTE, 0, src.remaining());
+      long ret =
+          Libzstd
               .ZSTD_decompress_usingDDict(
-                  dctx, dst, dst.remaining(), src, src.remaining(), ddict.ddict);
-      if (library().ZSTD_isError(ret)) {
-        throw new IllegalArgumentException(library().ZSTD_getErrorName(ret));
+                  dctx, dstSegment, dst.remaining(), srcSegment, src.remaining(), ddict.ddict);
+      if (Libzstd.ZSTD_isError(ret)!=0) {
+        throw new IllegalArgumentException(Libzstd.ZSTD_getErrorName(ret).getString(0));
       }
-      return ret;
+      MemorySegment.copy(dstSegment, ValueLayout.JAVA_BYTE, 0L, (Object) dst.array(), 0, (int) ret);
+      return (int) ret;
     }
 
     @Override
     public synchronized void close() throws IOException {
       if (closed == false) {
         closed = true;
-        library().ZSTD_freeDCtx(dctx);
+        Libzstd.ZSTD_freeDCtx(dctx);
         dctx = null;
       }
     }
@@ -183,10 +127,10 @@ final class Zstd {
 
   public static class CompressionDictionary implements Closeable {
 
-    private final Pointer cdict;
+    private final MemorySegment cdict;
     private boolean closed;
 
-    private CompressionDictionary(Pointer cdict) {
+    private CompressionDictionary(MemorySegment cdict) {
       this.cdict = cdict;
       if (cdict == null) {
         throw new IllegalStateException("Can't allocate compression dictionary");
@@ -197,17 +141,17 @@ final class Zstd {
     public synchronized void close() throws IOException {
       if (closed == false) {
         closed = true;
-        library().ZSTD_freeCDict(cdict);
+        Libzstd.ZSTD_freeCDict(cdict);
       }
     }
   }
 
   public static class DecompressionDictionary implements Closeable {
 
-    private final Pointer ddict;
+    private final MemorySegment ddict;
     private boolean closed;
 
-    private DecompressionDictionary(Pointer ddict) {
+    private DecompressionDictionary(MemorySegment ddict) {
       this.ddict = ddict;
       if (ddict == null) {
         throw new IllegalStateException("Can't allocate decompression dictionary");
@@ -218,25 +162,36 @@ final class Zstd {
     public synchronized void close() throws IOException {
       if (closed == false) {
         closed = true;
-        library().ZSTD_freeDDict(ddict);
+        Libzstd.ZSTD_freeDDict(ddict);
       }
     }
   }
 
   /** Create a dictionary for compression. */
   public static CompressionDictionary createCompressionDictionary(ByteBuffer buf, int level) {
-    return new CompressionDictionary(library().ZSTD_createCDict(buf, buf.remaining(), level));
+    MemorySegment dictBuffer = Arena.ofAuto().allocate(buf.remaining());
+    MemorySegment.copy(buf.array(), 0, dictBuffer, ValueLayout.JAVA_BYTE, 0, buf.remaining());
+    MemorySegment dict = Libzstd.ZSTD_createCDict(dictBuffer, buf.remaining(), level);
+    return new CompressionDictionary(dict);
   }
 
   public static DecompressionDictionary createDecompressionDictionary(ByteBuffer buf) {
-    return new DecompressionDictionary(library().ZSTD_createDDict(buf, buf.remaining()));
+    MemorySegment dictBuffer = Arena.ofAuto().allocate(buf.remaining());
+    MemorySegment.copy(buf.array(), 0, dictBuffer, ValueLayout.JAVA_BYTE, 0, buf.remaining());
+    MemorySegment dict = Libzstd.ZSTD_createDDict(dictBuffer, buf.remaining());
+    return new DecompressionDictionary(dict);
   }
 
   public static int getMaxCompressedLen(int srcLen) {
-    return library().ZSTD_compressBound(srcLen);
+    return (int) Libzstd.ZSTD_compressBound(srcLen);
   }
 
   public static int getDecompressedLen(ByteBuffer src) {
-    return library().ZSTD_getFrameContentSize(src, src.remaining());
+
+    MemorySegment srcSegment = Arena.ofAuto().allocate(src.remaining());
+    MemorySegment.copy(src.array(), 0, srcSegment, ValueLayout.JAVA_BYTE, 0, src.remaining());
+    return (int) Libzstd.ZSTD_getFrameContentSize(srcSegment, src.remaining());
+
   }
+
 }
