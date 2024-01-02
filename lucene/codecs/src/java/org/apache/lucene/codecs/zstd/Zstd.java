@@ -137,6 +137,10 @@ final class Zstd {
       }
     }
 
+    public MemorySegment getCdict() {
+      return cdict;
+    }
+
     @Override
     public synchronized void close() throws IOException {
       if (closed == false) {

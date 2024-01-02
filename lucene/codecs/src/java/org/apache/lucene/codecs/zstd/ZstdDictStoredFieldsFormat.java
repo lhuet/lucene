@@ -18,11 +18,13 @@ package org.apache.lucene.codecs.zstd;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.HexFormat;
 
 import org.apache.lucene.codecs.compressing.CompressionMode;
 import org.apache.lucene.codecs.compressing.Compressor;
 import org.apache.lucene.codecs.compressing.Decompressor;
 import org.apache.lucene.codecs.lucene90.compressing.Lucene90CompressingStoredFieldsFormat;
+import org.apache.lucene.panama.zstd.Libzstd;
 import org.apache.lucene.store.ByteBuffersDataInput;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
@@ -212,9 +214,13 @@ public final class ZstdDictStoredFieldsFormat extends Lucene90CompressingStoredF
         buffersInput.readBytes(buffer, 0, dictLength);
         doCompress(buffer, 0, dictLength, cctx, null, out);
 
+        System.out.println("Uncompressed dict:");
+        System.out.println(HexFormat.of().formatHex(buffer, 0, dictLength));
+
         // And then sub blocks with this dictionary
         try (Zstd.CompressionDictionary cdict =
             Zstd.createCompressionDictionary(ByteBuffer.wrap(buffer, 0, dictLength), level)) {
+          System.out.printf("Dict ID: {}", Libzstd.ZDICT_getDictID(cdict.getCdict(), dictLength));
           for (int start = dictLength; start < len; start += blockLength) {
             int l = Math.min(blockLength, len - start);
             buffersInput.readBytes(buffer, dictLength, l);
